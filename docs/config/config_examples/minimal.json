@@ -1,0 +1,26 @@
+{
+  "_comment_ru": "Минимальный пример конфига GLEX. Ключи и формат черновые и будут уточняться при реализации кода.",
+  "HomePlayfield": "Akua",
+
+  "MaxColoniesPerPlayfield": 1,
+  "MaxActiveAIVessels": 1,
+  "MaxGuardsNearColony": 6,
+  "MaxBuildersNearColony": 3,
+  "MaxResourceOutposts": 1,
+  "MaxDroneWavesPerHour": 2,
+  "MaxAIMCommandsPerMinute": 10,
+
+  "DropShipPrefabName": "GLEX_DropShip_T1",
+  "DropShipSpawnAltitude": 250,
+  "FlightMode": "CinematicFallback",
+  "FlightDurationSeconds": 25,
+
+  "EnableThreats": true,
+  "ThreatTickSeconds": 30,
+
+  "EnableResourceOutposts": false,
+  "ResourceProductionRate": 1.0,
+
+  "EnableExpansion": false,
+  "ExpansionDelaySeconds": 900
+}
