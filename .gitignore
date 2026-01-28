@@ -5,6 +5,7 @@
 .cursorrules
 .cursor/
 docs/examples/
+docs/decompiled/
 
 ## Игнорируемые файлы и папки Visual Studio / .NET
 
