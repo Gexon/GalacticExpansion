@@ -43,19 +43,57 @@ public interface ModInterface {
 - `Request_GlobalStructure_List` — список всех структур
 - `Request_Player_Info` — информация об игроке
 - `Request_ConsoleCommand` — выполнение консольной команды
+- `Request_Structure_Touch` — обновление таймера распада структуры
+- `Request_Playfield_Entity_List` — список всех сущностей на playfield
 
 **Типы событий:**
 - `Event_Player_ChangedPlayfield` — игрок сменил playfield
 - `Event_Statistics` — статистика (убийства, разрушения)
 - `Event_ChatMessage` — сообщение в чате
+- `Event_GameEvent` — события PDA (волны атак, достижения и т.д.)
+
+### Новые возможности API (после декомпиляции 1.15)
+
+**IEntity - Прямое управление сущностями:**
+- `MoveForward(float speed)` — движение вперед
+- `Move(Vector3 direction)` — движение в направлении
+- `MoveStop()` — остановка движения
+- `Position { get; set; }` — прямая установка позиции
+- `Rotation { get; set; }` — прямая установка поворота
+- `DamageEntity(int damageAmount, int damageType)` — нанесение урона
+
+**IPlayfield - Работа с местностью:**
+- `GetTerrainHeightAt(float x, float z)` — точное получение высоты рельефа ⭐
+- `SpawnEntity(string entityType, Vector3 pos, Quaternion rot)` — простой спавн
+- `LockStructureDevice(...)` — блокировка устройств на структурах
+
+**IPda - Расширенные возможности:**
+- `CreateWaveAttack(WaveStartData waveStart)` — программное создание волн атак
+- `SpawnEntityAtPosition(Vector3 position, string className, string faction, ...)` — спавн с фракцией
+- `CreateTimer(string id, float duration, Action timerAction)` — таймеры
+
+**IStructure - Информация о структуре:**
+- `LastVisitedTicks` — время последнего посещения (для decay)
+- `SetFaction(FactionGroup group, int entityId)` — смена фракции
+- `GetDockedVessels()` — список пристыкованных кораблей
+
+**События и делегаты:**
+- `IPlayfield.OnEntityLoaded/OnEntityUnloaded` — подписка на загрузку/выгрузку сущностей
+- `IApplication.Update/FixedUpdate` — регулярные обновления для логики
+- `IStructure.SignalChanged` — отслеживание изменений сигналов
+
+**Новые типы сущностей:**
+- `EntityType.NPCFighter` — НПС-истребитель
+- `EntityType.Civilian` — гражданский НПС
+- `EntityType.TroopTransport` — транспорт войск
 
 ### Ограничения API
 
-1. **Нет прямого управления AI:** Используется AIM через консольные команды
-2. **Нет API для определения высоты поверхности:** Используются эвристики
-3. **Нет API для получения ресурсных депозитов:** Симуляция
-4. **Нет API для урона конкретным блокам:** Только уничтожение структуры целиком
-5. **Асинхронность:** Все запросы callback-based
+1. ~~**Нет прямого управления AI:**~~ **✅ Частично решено** — доступны методы Move/MoveForward для базового управления
+2. ~~**Нет API для определения высоты поверхности:**~~ **✅ Решено** — доступен `IPlayfield.GetTerrainHeightAt()`
+3. **Нет API для получения ресурсных депозитов:** Используется симуляция
+4. **Нет API для урона конкретным блокам:** Только уничтожение структуры целиком или DamageEntity()
+5. **Асинхронность:** Все запросы callback-based (требуется адаптер для async/await)
 
 ---
 
