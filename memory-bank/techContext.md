@@ -111,6 +111,7 @@ GalacticExpansion/
 │   │   ├── Placement/                   # Location Finding
 │   │   ├── Tracking/                    # Player/Structure Tracking
 │   │   ├── Threat/                      # Threat Director
+│   │   ├── Transport/                   # Transport Manager
 │   │   └── Economy/                     # Resource Simulation
 │   ├── GalacticExpansion.Models/        # Data Models
 │   │   ├── Colony.cs
@@ -139,6 +140,7 @@ GalacticExpansion/
 - `AIM` — AIM команды и rate limits
 - `Placement` — параметры размещения структур
 - `Threat` — параметры системы угроз
+- `Transport` — параметры транспортной системы (скорость, радиус защиты базы)
 
 ---
 
@@ -295,3 +297,25 @@ dotnet test --collect:"XPlat Code Coverage"
 1. **ModAPI timeout:** Иногда запросы не возвращаются → используем timeout + retry
 2. **Prefab не найден:** Сервер не находит prefab → логируем WARNING, пропускаем спавн
 3. **Структуры исчезают:** Игра удаляет структуры при определенных условиях → периодически проверяем и пересоздаем
+4. **Движение транспорта:** Простое прямолинейное движение без обхода препятствий → используем короткие перелеты на высоте
+
+---
+
+## Модули проекта (краткий обзор)
+
+### Критические модули (MVP)
+1. **Empyrion Gateway** — адаптер для ModAPI с async/await
+2. **State Store** — персистентность с атомарной записью
+3. **Core Loop** — главный simulation engine
+4. **Entity Spawner** — создание структур и NPC
+5. **Threat Director** — управление угрозами и защитой
+6. **Unit Economy** — учет и производство боевых единиц
+
+### Расширенные модули (Post-MVP)
+7. **Transport Manager** — транспортировка юнитов для иммерсивности
+   - Десантные корабли для доставки защитников к аванпостам
+   - Умный выбор: транспорт vs прямой спавн из базы/портала
+   - Патрульные корабли из ангара базы
+   - Логистические рейсы (визуальный эффект)
+8. **Hostility Tracker** — система "Most Wanted" для охоты на врагов
+9. **Colony Evolution** — постепенная экспансия к родной планете врага

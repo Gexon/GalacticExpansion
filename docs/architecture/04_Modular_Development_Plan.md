@@ -49,6 +49,7 @@ graph TB
     
     AIMOrch[AIM Orchestrator<br/>AI Commands]
     ThreatDir[Threat Director<br/>Combat Manager]
+    TransportMgr[Transport Manager<br/>Unit Transport]
     
     PlayerTracker[Player Tracker]
     StructTracker[Structure Tracker]
@@ -70,7 +71,11 @@ graph TB
     SpawnEvo --> StageManager
     
     ThreatDir --> AIMOrch
+    ThreatDir --> TransportMgr
     AIMOrch --> Gateway
+    
+    TransportMgr --> SpawnEvo
+    TransportMgr --> AIMOrch
     
     PlayerTracker --> Gateway
     StructTracker --> Gateway
@@ -88,7 +93,7 @@ graph TB
 |-----------|--------|----------|
 | **Foundation (Фундамент)** | Gateway, StateStore | Базовые сервисы, необходимые для всех остальных модулей |
 | **Core (Ядро)** | Core Loop, Event Bus | Центральная логика симуляции и координация |
-| **Domain (Домен)** | SpawnEvo, EcoSim, ThreatDir | Бизнес-логика специфичных областей |
+| **Domain (Домен)** | SpawnEvo, EcoSim, ThreatDir, TransportMgr | Бизнес-логика специфичных областей |
 | **Infrastructure (Инфраструктура)** | PlayerTracker, StructTracker | Отслеживание состояния игрового мира |
 | **Integration (Интеграция)** | AIM Orchestrator, Placement | Интеграция с внешними системами |
 
@@ -404,6 +409,11 @@ graph TB
 #### 5.2 Advanced Features (Post-MVP)
 
 **Опциональные возможности:**
+- [ ] **Transport Manager (Module_14)** — Транспортировка юнитов для иммерсивности
+  - Доставка защитников на транспорте вместо мгновенного спавна
+  - Умный выбор: транспорт для аванпостов, прямой спавн для базы/портала
+  - Патрульные корабли из ангара базы
+  - Логистические рейсы между базой и аванпостами
 - [ ] Экспансия на новые планеты (FR-008)
 - [ ] Порталы и верфи (FR-009)
 - [ ] Метеоритные дожди (FR-010)
@@ -416,6 +426,12 @@ graph TB
 - Документация обновлена
 
 **Время:** 2 недели (опционально)
+
+**Детали Module_14 Transport Manager:**
+- **Зависимости:** Module_04 (Entity Spawner), Module_13 (Unit Economy), Module_10 (Threat Director)
+- **Время разработки:** ~5 дней
+- **Приоритет:** Средний (улучшение UX, не критично для MVP)
+- **Документация:** [Module_14_Transport_Manager.md](modules/Module_14_Transport_Manager.md)
 
 ---
 

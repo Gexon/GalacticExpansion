@@ -1,7 +1,7 @@
 # Модуль: Threat Director
 
 **Приоритет разработки:** 2 (Высокий)  
-**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker), Module_12 (Hostility Tracker), Module_13 (Unit Economy)  
+**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker), Module_12 (Hostility Tracker), Module_13 (Unit Economy), Module_14 (Transport Manager)  
 **Статус:** 🟡 В разработке
 
 ---
@@ -29,6 +29,7 @@ graph TB
     
     EntitySpawner[Entity Spawner]
     AIMOrchestrator[AIM Orchestrator]
+    TransportManager[Transport Manager]
     EventBus[Event Bus]
     
     CoreLoop -->|Update tick| ThreatDirector
@@ -37,9 +38,13 @@ graph TB
     HostilityTracker -->|Most Wanted Target| ThreatDirector
     HostilityTracker -->|Rank Changed| ThreatDirector
     
+    ThreatDirector -->|Deploy defenders| TransportManager
     ThreatDirector -->|Spawn guards| EntitySpawner
     ThreatDirector -->|Launch wave| AIMOrchestrator
     ThreatDirector -->|Publish events| EventBus
+    
+    TransportManager -->|Spawn transport| EntitySpawner
+    TransportManager -->|Move units| AIMOrchestrator
 ```
 
 ---
@@ -409,10 +414,16 @@ public class SimulationEngine
 
 **КРИТИЧЕСКИ ВАЖНО:** С версии 1.1 все спавны защитников проходят через Unit Economy для учета доступности юнитов.
 
-### 8.1 Модифицированный SpawnDefendersAsync
+### 8.1 Модифицированный SpawnDefendersAsync (с Transport Manager)
 
 ```csharp
-public async Task SpawnDefendersAsync(Colony colony, Vector3 position, int requestedCount)
+/// <summary>
+/// Развертывание защитников через Transport Manager.
+/// Автоматически выбирает метод доставки:
+/// - Защита главной базы → спавн из базы/портала (мгновенно)
+/// - Защита аванпоста → десантный корабль от базы (1-2 мин)
+/// </summary>
+public async Task SpawnDefendersAsync(Colony colony, Vector3 incidentLocation, int requestedCount)
 {
     // ШАГ 1: Проверка доступности юнитов через Unit Economy
     if (!_unitEconomy.CanSpawnUnit(colony, UnitType.Guard, requestedCount))
@@ -442,32 +453,40 @@ public async Task SpawnDefendersAsync(Colony colony, Vector3 position, int reque
         }
     }
     
-    // ШАГ 2: Резервируем юниты (уменьшает доступное количество)
-    if (!_unitEconomy.ReserveUnits(colony, UnitType.Guard, requestedCount))
-    {
-        _logger.LogError($"Failed to reserve {requestedCount} guards");
-        return;
-    }
-    
-    // ШАГ 3: Спавним через Entity Spawner
-    var spawnedIds = await _entitySpawner.SpawnNPCGroupAsync(
-        "ZiraxMinigunPatrol",
-        position,
-        requestedCount,
-        colony.FactionId
+    // ШАГ 2: Вызываем Transport Manager для умной доставки
+    // Transport Manager сам:
+    // - Резервирует юниты через Unit Economy
+    // - Выбирает метод доставки (транспорт vs прямой спавн)
+    // - Спавнит транспорт или юнитов напрямую
+    // - Регистрирует активные юниты
+    var mission = await _transportManager.DeployDefendersAsync(
+        colony,
+        incidentLocation,
+        requestedCount
     );
     
-    // ШАГ 4: Регистрируем активные юниты в Unit Economy
-    foreach (var entityId in spawnedIds)
+    if (mission != null)
     {
-        _unitEconomy.RegisterActiveUnit(colony, entityId, UnitType.Guard, "Defender");
+        if (mission.IsDirectSpawn)
+        {
+            // Защитники вышли из базы/портала (мгновенно)
+            _logger.LogInformation(
+                $"Colony {colony.Id} deployed {requestedCount} guards from base/portal"
+            );
+        }
+        else
+        {
+            // Защитники прибывают на транспорте
+            _logger.LogInformation(
+                $"Colony {colony.Id} dispatched {requestedCount} guards via {mission.TransportType}, " +
+                $"ETA: {mission.EstimatedArrival?.ToString("HH:mm:ss")}"
+            );
+        }
     }
     
     var remaining = _unitEconomy.GetAvailableCount(colony, UnitType.Guard);
-    
     _logger.LogInformation(
-        $"Colony {colony.Id} deployed {requestedCount} guards. " +
-        $"Remaining in reserve: {remaining}/{colony.UnitPool.MaxGuards}"
+        $"Colony {colony.Id} remaining guards in reserve: {remaining}/{colony.UnitPool.MaxGuards}"
     );
 }
 ```
@@ -655,7 +674,8 @@ public async Task RespondToDestruction_EscalatesToCritical()
 - **[Module_05_AIM_Orchestrator.md](Module_05_AIM_Orchestrator.md)** — волны атак
 - **[Module_08_Player_Tracker.md](Module_08_Player_Tracker.md)** — близость игроков и онлайн статус
 - **[Module_12_Hostility_Tracker.md](Module_12_Hostility_Tracker.md)** — система Most Wanted и ранги враждебности
-- **[Module_13_Unit_Economy.md](Module_13_Unit_Economy.md)** — управление доступностью юнитов и производством ✨ НОВОЕ
+- **[Module_13_Unit_Economy.md](Module_13_Unit_Economy.md)** — управление доступностью юнитов и производством
+- **[Module_14_Transport_Manager.md](Module_14_Transport_Manager.md)** — транспортировка юнитов для иммерсивности ✨ НОВОЕ
 
 ---
 
