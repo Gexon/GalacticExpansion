@@ -1,7 +1,7 @@
 # Модуль: Threat Director
 
 **Приоритет разработки:** 2 (Высокий)  
-**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker)  
+**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker), Module_12 (Hostility Tracker)  
 **Статус:** 🟡 В разработке
 
 ---
@@ -23,6 +23,7 @@ graph TB
     CoreLoop[Core Loop]
     StructureTracker[Structure Tracker]
     PlayerTracker[Player Tracker]
+    HostilityTracker[Hostility Tracker]
     
     ThreatDirector[Threat Director<br/>Этот модуль]
     
@@ -33,6 +34,8 @@ graph TB
     CoreLoop -->|Update tick| ThreatDirector
     StructureTracker -->|Structure Destroyed| ThreatDirector
     PlayerTracker -->|Player Near Colony| ThreatDirector
+    HostilityTracker -->|Most Wanted Target| ThreatDirector
+    HostilityTracker -->|Rank Changed| ThreatDirector
     
     ThreatDirector -->|Spawn guards| EntitySpawner
     ThreatDirector -->|Launch wave| AIMOrchestrator
@@ -52,7 +55,8 @@ public enum ThreatLevel
     Low = 1,        // Низкая (игроки далеко, >2км)
     Medium = 2,     // Средняя (игроки близко, <2км)
     High = 3,       // Высокая (игроки атакуют структуры)
-    Critical = 4    // Критическая (база разрушена)
+    Critical = 4,   // Критическая (база разрушена)
+    Hunt = 5        // ОХОТА: Most Wanted игрок онлайн (ранг 3+)
 }
 ```
 
@@ -65,6 +69,24 @@ public enum ThreatLevel
 | **Medium** | Игроки 500м-2км от базы | Усиленные патрули (4-8 охранников) |
 | **High** | Игроки атакуют (<500м) или урон по структурам | Волна атак (дроны) + подкрепление |
 | **Critical** | База уничтожена | Массированная контратака + откат стадии |
+| **Hunt** | Most Wanted онлайн (ранг 3+) | Специальные охотничьи отряды против конкретного игрока |
+
+### 3.3 Интеграция с Most Wanted системой
+
+**Приоритет угрозы:** Most Wanted > Proximity > Standard
+
+```csharp
+// Модификаторы уровня угрозы от ранга Most Wanted
+var rankThreatModifier = mostWanted.Rank switch
+{
+    WantedRank.Offender => 1.25f,    // +25% патрулей
+    WantedRank.Enemy => 1.5f,         // +50% патрулей + волны каждые 15 мин
+    WantedRank.Terrorist => 2.0f,     // Охотничьи отряды каждые 10 мин
+    WantedRank.Nemesis => 3.0f,       // Assassination Squad
+    WantedRank.Genocider => 5.0f,     // CV-носитель + массированная охота
+    _ => 1.0f
+};
+```
 
 ---
 
@@ -163,6 +185,18 @@ public class ThreatDirector : IThreatDirector
     {
         var score = 0f;
         
+        // ПРИОРИТЕТ: Проверка Most Wanted системы
+        var mostWanted = _hostilityTracker.GetMostWantedTarget(colony);
+        if (mostWanted != null && mostWanted.IsOnline && mostWanted.Rank >= WantedRank.Terrorist)
+        {
+            // Most Wanted ранга 3+ онлайн - активируем режим охоты
+            _logger.LogWarning(
+                $"Colony {colony.Id} entering HUNT mode: Most Wanted player {mostWanted.PlayerId} " +
+                $"online (rank: {mostWanted.Rank}, score: {mostWanted.HostilityScore})"
+            );
+            return ThreatLevel.Hunt;
+        }
+        
         // Фактор 1: Близость игроков
         var nearbyPlayers = _playerTracker.GetPlayersNearPosition(colony.Playfield, colony.Position, 2000f);
         if (!nearbyPlayers.Any()) return ThreatLevel.None;
@@ -181,6 +215,21 @@ public class ThreatDirector : IThreatDirector
         
         // Фактор 4: Ценность колонии
         score += (int)colony.Stage * 3f;
+        
+        // Фактор 5: Модификатор от Most Wanted (даже если оффлайн)
+        if (mostWanted != null)
+        {
+            var rankModifier = mostWanted.Rank switch
+            {
+                WantedRank.Offender => 1.25f,
+                WantedRank.Enemy => 1.5f,
+                WantedRank.Terrorist => 2.0f,
+                WantedRank.Nemesis => 3.0f,
+                WantedRank.Genocider => 5.0f,
+                _ => 1.0f
+            };
+            score *= rankModifier;
+        }
         
         // Преобразование в уровень
         if (score < 10) return ThreatLevel.None;
@@ -219,15 +268,90 @@ public class ThreatDirector : IThreatDirector
             case ThreatLevel.Medium:
                 await SpawnDefendersAsync(colony, colony.Position, 4);
                 break;
+            
             case ThreatLevel.High:
                 await SpawnDefendersAsync(colony, colony.Position, 6);
                 var target = FindNearestPlayerStructure(colony);
                 if (target != null) await LaunchWaveAttackAsync(colony, target.id, 50);
                 break;
+            
             case ThreatLevel.Critical:
                 await SpawnDefendersAsync(colony, colony.Position, 10);
                 target = FindNearestPlayerStructure(colony);
                 if (target != null) await LaunchWaveAttackAsync(colony, target.id, 150);
+                break;
+            
+            case ThreatLevel.Hunt:
+                // РЕЖИМ ОХОТЫ: целенаправленная охота на Most Wanted игрока
+                var mostWanted = _hostilityTracker.GetMostWantedTarget(colony);
+                if (mostWanted != null && mostWanted.IsOnline)
+                {
+                    await LaunchHuntOperationAsync(colony, mostWanted);
+                }
+                break;
+        }
+    }
+    
+    /// <summary>
+    /// Запуск операции охоты на конкретного игрока
+    /// </summary>
+    private async Task LaunchHuntOperationAsync(Colony colony, PlayerHostilityInfo target)
+    {
+        _logger.LogWarning(
+            $"Launching HUNT operation against player {target.PlayerId} " +
+            $"(rank: {target.Rank}, score: {target.HostilityScore})"
+        );
+        
+        switch (target.Rank)
+        {
+            case WantedRank.Offender:
+                // Усиленные патрули (+25%)
+                await SpawnDefendersAsync(colony, colony.Position, 3);
+                break;
+            
+            case WantedRank.Enemy:
+                // Периодические волны каждые 15 минут
+                await SpawnDefendersAsync(colony, colony.Position, 5);
+                if (ShouldLaunchWave(colony, TimeSpan.FromMinutes(15)))
+                {
+                    var playerStructure = FindPlayerStructure(target.PlayerId);
+                    if (playerStructure != null)
+                        await LaunchWaveAttackAsync(colony, playerStructure.id, 75);
+                }
+                break;
+            
+            case WantedRank.Terrorist:
+                // Элитные охотничьи отряды каждые 10 минут
+                if (ShouldLaunchHunterSquad(colony, TimeSpan.FromMinutes(10)))
+                {
+                    await SpawnEliteHuntersAsync(colony, target, count: 7);
+                }
+                break;
+            
+            case WantedRank.Nemesis:
+                // Assassination Squad - отряд убийц
+                if (ShouldLaunchAssassinationSquad(colony, TimeSpan.FromMinutes(20)))
+                {
+                    await SpawnAssassinationSquadAsync(colony, target, count: 12);
+                }
+                // Бомбардировки баз игрока
+                var playerBase = FindPlayerStructure(target.PlayerId);
+                if (playerBase != null)
+                    await LaunchWaveAttackAsync(colony, playerBase.id, 200);
+                break;
+            
+            case WantedRank.Genocider:
+                // CV-носитель + массированная непрерывная охота
+                await SpawnCarrierCVAsync(colony);
+                await SpawnAssassinationSquadAsync(colony, target, count: 15);
+                await DeployForwardOperatingBaseAsync(colony, target);
+                
+                // Массированные атаки на все структуры игрока
+                var allPlayerStructures = _structureTracker.GetPlayerStructures(target.PlayerId);
+                foreach (var structure in allPlayerStructures.Take(3))
+                {
+                    await LaunchWaveAttackAsync(colony, structure.id, 300);
+                }
                 break;
         }
     }
@@ -370,10 +494,11 @@ public async Task RespondToDestruction_EscalatesToCritical()
 
 ## 11. Связь с другими документами
 
-- **[Module_04_Entity_Spawner.md](Module_04_Entity_Spawner.md)** — спавн защитников
+- **[Module_04_Entity_Spawner.md](Module_04_Entity_Spawner.md)** — спавн защитников и охотников
 - **[Module_05_AIM_Orchestrator.md](Module_05_AIM_Orchestrator.md)** — волны атак
-- **[Module_08_Player_Tracker.md](Module_08_Player_Tracker.md)** — близость игроков
+- **[Module_08_Player_Tracker.md](Module_08_Player_Tracker.md)** — близость игроков и онлайн статус
+- **[Module_12_Hostility_Tracker.md](Module_12_Hostility_Tracker.md)** — система Most Wanted и ранги враждебности
 
 ---
 
-**Последнее обновление:** 28.01.2026
+**Последнее обновление:** 29.01.2026

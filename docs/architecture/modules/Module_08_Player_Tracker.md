@@ -71,6 +71,11 @@ public interface IPlayerTracker
     /// </summary>
     PlayerInfo GetPlayer(int playerId);
     
+    /// <summary>
+    /// Проверка, находится ли игрок онлайн
+    /// </summary>
+    bool IsPlayerOnline(int playerId);
+    
     // === События ===
     
     /// <summary>
@@ -166,6 +171,15 @@ public class PlayerTracker : IPlayerTracker
             .ToList();
     }
     
+    public bool IsPlayerOnline(int playerId)
+    {
+        if (_playersById.TryGetValue(playerId, out var player))
+        {
+            return player.IsOnline;
+        }
+        return false;
+    }
+    
     private void OnGameEvent(object sender, GameEventArgs e)
     {
         switch (e.EventId)
@@ -179,6 +193,50 @@ public class PlayerTracker : IPlayerTracker
             case CmdId.Event_Player_Disconnected:
                 HandlePlayerDisconnected(e);
                 break;
+        }
+    }
+    
+    private void HandlePlayerConnected(GameEventArgs e)
+    {
+        var data = (Id)e.Data;
+        
+        if (_playersById.TryGetValue(data.id, out var player))
+        {
+            player.IsOnline = true;
+            player.LastSeen = DateTime.UtcNow;
+            _logger.LogInformation($"Player {data.id} connected");
+        }
+        else
+        {
+            // Новый игрок - создаем запись
+            var newPlayer = new PlayerInfo
+            {
+                PlayerId = data.id,
+                IsOnline = true,
+                LastSeen = DateTime.UtcNow
+            };
+            _playersById[data.id] = newPlayer;
+            _logger.LogInformation($"New player {data.id} connected");
+        }
+    }
+    
+    private void HandlePlayerDisconnected(GameEventArgs e)
+    {
+        var data = (Id)e.Data;
+        
+        if (_playersById.TryGetValue(data.id, out var player))
+        {
+            player.IsOnline = false;
+            player.LastSeen = DateTime.UtcNow;
+            
+            // Удаляем из playfield
+            if (!string.IsNullOrEmpty(player.CurrentPlayfield))
+            {
+                RemovePlayerFromPlayfield(data.id, player.CurrentPlayfield);
+                player.CurrentPlayfield = null;
+            }
+            
+            _logger.LogInformation($"Player {data.id} disconnected");
         }
     }
     
@@ -304,7 +362,13 @@ public void PlayerEntered_EventFired()
 **Этап 3: Дополнительные фичи (0.5 дня)**
 - [ ] `GetPlayersNearPosition()` с радиусом
 - [ ] Обработка `Player_Connected` / `Player_Disconnected`
+- [ ] `IsPlayerOnline()` для проверки онлайн статуса
 - [ ] Оптимизация производительности
+
+**Этап 4: Интеграция с Hostility Tracker (0.5 дня)**
+- [ ] Событие смерти игрока (`Event_Player_Death`)
+- [ ] Передача события в HostilityTracker для снижения враждебности
+- [ ] Интеграция-тесты с HostilityTracker
 
 ---
 
@@ -312,7 +376,8 @@ public void PlayerEntered_EventFired()
 
 - **[Module_01_Core_Loop.md](Module_01_Core_Loop.md)** — использует PlayerTracker для активации колоний
 - **[Module_10_Threat_Director.md](Module_10_Threat_Director.md)** — реагирует на близость игроков
+- **[Module_12_Hostility_Tracker.md](Module_12_Hostility_Tracker.md)** — использует онлайн статус для приоритизации Most Wanted
 
 ---
 
-**Последнее обновление:** 28.01.2026
+**Последнее обновление:** 29.01.2026
