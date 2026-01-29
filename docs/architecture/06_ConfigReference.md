@@ -358,6 +358,169 @@
 
 ---
 
+### 2.9 UnitEconomy (Управление юнитами) ✨ НОВОЕ
+
+**Назначение:** Управление производством, доступностью и лимитами боевых единиц колоний
+
+#### UnitEconomy.Enabled
+**Тип:** Boolean  
+**По умолчанию:** `true`  
+**Описание:** Включить систему учета юнитов
+
+```json
+"UnitEconomy": {
+  "Enabled": true
+}
+```
+
+**Эффекты:**
+- `true` — юниты ограничены, производятся с течением времени, потери ощутимы
+- `false` — старое поведение, бесконечные юниты (не рекомендуется)
+
+---
+
+#### UnitEconomy.StageCapacity
+
+**Описание:** Максимальная вместимость и скорость производства юнитов для каждой стадии базы
+
+**Структура:**
+```json
+"StageCapacity": {
+  "ConstructionYard": {
+    "MaxGuards": 2,
+    "MaxPatrolVessels": 0,
+    "MaxWarships": 0,
+    "MaxDrones": 5,
+    "ProductionRatePerHour": 1.0
+  },
+  "BaseL1": {
+    "MaxGuards": 6,
+    "MaxPatrolVessels": 1,
+    "MaxWarships": 0,
+    "MaxDrones": 10,
+    "ProductionRatePerHour": 2.0
+  },
+  "BaseL2": {
+    "MaxGuards": 10,
+    "MaxPatrolVessels": 2,
+    "MaxWarships": 1,
+    "MaxDrones": 20,
+    "ProductionRatePerHour": 3.5
+  },
+  "BaseL3": {
+    "MaxGuards": 15,
+    "MaxPatrolVessels": 3,
+    "MaxWarships": 2,
+    "MaxDrones": 30,
+    "ProductionRatePerHour": 5.0
+  },
+  "BaseMax": {
+    "MaxGuards": 20,
+    "MaxPatrolVessels": 4,
+    "MaxWarships": 3,
+    "MaxDrones": 50,
+    "ProductionRatePerHour": 8.0
+  }
+}
+```
+
+**Параметры каждой стадии:**
+- `MaxGuards` — максимум охранников в резерве
+- `MaxPatrolVessels` — максимум патрульных кораблей
+- `MaxWarships` — максимум боевых кораблей (CV)
+- `MaxDrones` — максимум дронов для волн атак
+- `ProductionRatePerHour` — базовая скорость производства (юнитов в час)
+
+**Рекомендации по балансировке:**
+- Увеличивайте ProductionRate для более быстрого восстановления
+- Увеличивайте Max* для более крупных гарнизонов
+- Соблюдайте пропорции между стадиями (каждая следующая ~x1.5-2)
+
+---
+
+#### UnitEconomy.UnitProductionCosts
+
+**Описание:** Стоимость производства каждого типа юнита (используется в будущем для расширенной экономики)
+
+```json
+"UnitProductionCosts": {
+  "Guard": {
+    "ResourceCost": 50,
+    "ProductionTimeSeconds": 300,
+    "MinimumStage": "ConstructionYard"
+  },
+  "PatrolVessel": {
+    "ResourceCost": 500,
+    "ProductionTimeSeconds": 1800,
+    "MinimumStage": "BaseL1",
+    "RequiresShipyard": false
+  },
+  "Warship": {
+    "ResourceCost": 2000,
+    "ProductionTimeSeconds": 3600,
+    "MinimumStage": "BaseL2",
+    "RequiresShipyard": true
+  },
+  "Drone": {
+    "ResourceCost": 20,
+    "ProductionTimeSeconds": 60,
+    "MinimumStage": "ConstructionYard"
+  },
+  "EliteHunter": {
+    "ResourceCost": 200,
+    "ProductionTimeSeconds": 600,
+    "MinimumStage": "BaseL2"
+  }
+}
+```
+
+**Примечание:** В текущей версии используется только общий ProductionRate. Индивидуальные стоимости зарезервированы для будущих версий.
+
+---
+
+#### UnitEconomy.ProductionModifiers
+
+**Описание:** Модификаторы скорости производства юнитов
+
+```json
+"ProductionModifiers": {
+  "ResourceOutpostBonus": 0.25,
+  "ShipyardBonus": 0.5,
+  "DroneBaseBonus": 1.0,
+  "UnderAttackPenalty": -0.3
+}
+```
+
+**Параметры:**
+- `ResourceOutpostBonus` — бонус за каждый ресурсный аванпост (+25% за аванпост)
+- `ShipyardBonus` — бонус при наличии верфи (+50%)
+- `DroneBaseBonus` — бонус при наличии дронбазы (+100%)
+- `UnderAttackPenalty` — штраф при атаке на базу (-30%)
+
+**Формула расчета:**
+```
+ActualProductionRate = BaseRate × (1 + OutpostCount × OutpostBonus) × 
+                       (1 + ShipyardBonus) × (1 + DroneBaseBonus) × 
+                       (1 + AttackPenalty)
+```
+
+**Пример:**
+```
+BaseL2: BaseRate = 3.5/час
++ 2 аванпоста: ×1.5 (2 × 0.25)
++ верфь: ×1.5
++ дронбаза: ×2.0
+- под атакой: ×0.7
+= 3.5 × 1.5 × 1.5 × 2.0 × 0.7 = 11.025 юнитов/час
+```
+
+**Влияние разрушений:**
+- Уничтожение аванпоста → снижение производства на 25%
+- Уничтожение верфи → снижение на 50% + невозможность производить корабли
+- Уничтожение дронбазы → снижение производства дронов в 2 раза
+
+---
+
 ## 3. Примеры конфигураций
 
 ### 3.1 MVP Configuration (Balanced)

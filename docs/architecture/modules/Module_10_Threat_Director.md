@@ -1,7 +1,7 @@
 # Модуль: Threat Director
 
 **Приоритет разработки:** 2 (Высокий)  
-**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker), Module_12 (Hostility Tracker)  
+**Зависимости:** Module_04 (Entity Spawner), Module_05 (AIM Orchestrator), Module_08 (Player Tracker), Module_12 (Hostility Tracker), Module_13 (Unit Economy)  
 **Статус:** 🟡 В разработке
 
 ---
@@ -405,7 +405,164 @@ public class SimulationEngine
 
 ---
 
-## 8. Тестирование
+## 8. Интеграция с Unit Economy Manager
+
+**КРИТИЧЕСКИ ВАЖНО:** С версии 1.1 все спавны защитников проходят через Unit Economy для учета доступности юнитов.
+
+### 8.1 Модифицированный SpawnDefendersAsync
+
+```csharp
+public async Task SpawnDefendersAsync(Colony colony, Vector3 position, int requestedCount)
+{
+    // ШАГ 1: Проверка доступности юнитов через Unit Economy
+    if (!_unitEconomy.CanSpawnUnit(colony, UnitType.Guard, requestedCount))
+    {
+        var available = _unitEconomy.GetAvailableCount(colony, UnitType.Guard);
+        
+        _logger.LogWarning(
+            $"Colony {colony.Id} cannot spawn {requestedCount} guards. " +
+            $"Only {available} available. Resources depleted!"
+        );
+        
+        // Спавним сколько можем
+        requestedCount = Math.Min(requestedCount, available);
+        
+        if (requestedCount == 0)
+        {
+            _logger.LogError(
+                $"Colony {colony.Id} has NO guards available! Cannot defend. " +
+                $"Production rate: {colony.UnitPool.ProductionRate:F2}/hour"
+            );
+            
+            // Отправляем сообщение игрокам (опционально)
+            await NotifyPlayersAsync(colony.Playfield, 
+                "[Zirax Command] Defenses critically weakened. Reinforcements delayed.");
+            
+            return;
+        }
+    }
+    
+    // ШАГ 2: Резервируем юниты (уменьшает доступное количество)
+    if (!_unitEconomy.ReserveUnits(colony, UnitType.Guard, requestedCount))
+    {
+        _logger.LogError($"Failed to reserve {requestedCount} guards");
+        return;
+    }
+    
+    // ШАГ 3: Спавним через Entity Spawner
+    var spawnedIds = await _entitySpawner.SpawnNPCGroupAsync(
+        "ZiraxMinigunPatrol",
+        position,
+        requestedCount,
+        colony.FactionId
+    );
+    
+    // ШАГ 4: Регистрируем активные юниты в Unit Economy
+    foreach (var entityId in spawnedIds)
+    {
+        _unitEconomy.RegisterActiveUnit(colony, entityId, UnitType.Guard, "Defender");
+    }
+    
+    var remaining = _unitEconomy.GetAvailableCount(colony, UnitType.Guard);
+    
+    _logger.LogInformation(
+        $"Colony {colony.Id} deployed {requestedCount} guards. " +
+        $"Remaining in reserve: {remaining}/{colony.UnitPool.MaxGuards}"
+    );
+}
+```
+
+### 8.2 Обработка исчерпания резервов
+
+```csharp
+private async Task HandleDepletedReserves(Colony colony, ThreatLevel level)
+{
+    var pool = _unitEconomy.GetUnitPool(colony);
+    
+    if (pool.AvailableGuards == 0 && pool.AvailableDrones == 0)
+    {
+        // Критическая ситуация: нет юнитов для защиты
+        _logger.LogCritical(
+            $"Colony {colony.Id} completely out of units! " +
+            $"Production rate: {pool.ProductionRate:F2}/hour. " +
+            $"Next unit in {CalculateTimeToNextUnit(pool)} minutes."
+        );
+        
+        // Временно снижаем уровень угрозы (база не может ответить)
+        colony.ThreatLevel = ThreatLevel.Low;
+        
+        // Уведомляем игрока о временном преимуществе
+        await NotifyPlayersAsync(
+            colony.Playfield,
+            "[Zirax Command] Our forces are stretched thin. This is your chance."
+        );
+    }
+}
+
+private float CalculateTimeToNextUnit(UnitPool pool)
+{
+    if (pool.ProductionRate <= 0) return float.MaxValue;
+    
+    var remainingProgress = 1.0f - pool.ProductionProgress;
+    var hoursNeeded = remainingProgress / pool.ProductionRate;
+    return hoursNeeded * 60f; // В минутах
+}
+```
+
+### 8.3 Адаптация к нехватке ресурсов
+
+```csharp
+public async Task ActivateDefensesAsync(Colony colony, ThreatLevel level)
+{
+    var pool = _unitEconomy.GetUnitPool(colony);
+    
+    switch (level)
+    {
+        case ThreatLevel.Medium:
+            // Пытаемся вызвать 4 охранника
+            var mediumCount = Math.Min(4, pool.AvailableGuards);
+            if (mediumCount > 0)
+                await SpawnDefendersAsync(colony, colony.Position, mediumCount);
+            break;
+        
+        case ThreatLevel.High:
+            // Пытаемся вызвать 6 охранников + волну дронов
+            var highCount = Math.Min(6, pool.AvailableGuards);
+            if (highCount > 0)
+                await SpawnDefendersAsync(colony, colony.Position, highCount);
+            
+            // Волна дронов (если есть доступные)
+            if (pool.AvailableDrones >= 5)
+            {
+                var target = FindNearestPlayerStructure(colony);
+                if (target != null)
+                {
+                    var droneCost = 5; // Дроны на волну
+                    if (_unitEconomy.ReserveUnits(colony, UnitType.Drone, droneCost))
+                        await LaunchWaveAttackAsync(colony, target.id, 50);
+                }
+            }
+            break;
+        
+        case ThreatLevel.Critical:
+            // Выделяем ВСЕ доступные резервы
+            if (pool.AvailableGuards > 0)
+                await SpawnDefendersAsync(colony, colony.Position, pool.AvailableGuards);
+            
+            if (pool.AvailableDrones >= 10)
+            {
+                var target = FindNearestPlayerStructure(colony);
+                if (target != null && _unitEconomy.ReserveUnits(colony, UnitType.Drone, 10))
+                    await LaunchWaveAttackAsync(colony, target.id, 150);
+            }
+            break;
+    }
+}
+```
+
+---
+
+## 9. Тестирование
 
 ```csharp
 [Fact]
@@ -498,6 +655,7 @@ public async Task RespondToDestruction_EscalatesToCritical()
 - **[Module_05_AIM_Orchestrator.md](Module_05_AIM_Orchestrator.md)** — волны атак
 - **[Module_08_Player_Tracker.md](Module_08_Player_Tracker.md)** — близость игроков и онлайн статус
 - **[Module_12_Hostility_Tracker.md](Module_12_Hostility_Tracker.md)** — система Most Wanted и ранги враждебности
+- **[Module_13_Unit_Economy.md](Module_13_Unit_Economy.md)** — управление доступностью юнитов и производством ✨ НОВОЕ
 
 ---
 

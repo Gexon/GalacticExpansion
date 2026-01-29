@@ -18,6 +18,10 @@
 - Spawning & Evolution
 - AIM Orchestrator
 - Placement Resolver
+- Economy Simulator
+- Unit Economy Manager
+- Threat Director
+- Hostility Tracker
 
 ### Event-Driven Architecture
 
@@ -200,6 +204,126 @@ public void OnPlayerKilledByColony(int playerId, int killerNpcId, string colonyI
 - Убийство юнитами конкретной колонии → снижает враждебность к ней
 - Стимулирует сражение с колонией, а не избегание
 
+### Unit Pool Management Pattern
+
+**Проблема:** Как сделать юниты конечными и ощутимыми, чтобы игрок чувствовал последствия потерь?
+
+**Решение:** Система резервов и производства с течением времени
+```csharp
+public class UnitPool
+{
+    public int AvailableGuards { get; set; }  // Резерв для немедленного спавна
+    public int MaxGuards { get; set; }         // Максимальная вместимость
+    public float ProductionRate { get; set; } // Юнитов в час
+    public float ProductionProgress { get; set; } // Накопленный прогресс
+    public List<ActiveUnit> ActiveUnits { get; set; } // Активные в мире
+}
+
+// Производство с течением времени
+public void ProduceUnits(Colony colony, float deltaTime)
+{
+    var rate = CalculateProductionRate(colony);
+    colony.UnitPool.ProductionProgress += (rate / 3600f) * deltaTime;
+    
+    if (colony.UnitPool.ProductionProgress >= 1.0f)
+    {
+        var units = (int)colony.UnitPool.ProductionProgress;
+        colony.UnitPool.ProductionProgress -= units;
+        DistributeProducedUnits(colony, units);
+    }
+}
+```
+
+**Ключевые принципы:**
+1. **Reserve before spawn:** Резервируем юниты до спавна, не после
+2. **Track active units:** Регистрируем активные юниты для учета потерь
+3. **No instant respawn:** Потерянный юнит НЕ возвращается, нужно ждать производства
+4. **Production modifiers:** Разрушение инфраструктуры снижает производство
+
+**Формула производства:**
+```
+ProductionRate = BaseRate × (1 + OutpostCount × 0.25) × 
+                 ShipyardBonus × DroneBaseBonus × AttackPenalty
+
+Модификаторы:
+- Каждый аванпост: +25%
+- Верфь: +50%
+- Дронбаза: +100%
+- Под атакой: -30%
+```
+
+**Преимущества:**
+- Конечность юнитов создает стратегическую глубину
+- Разрушение инфраструктуры имеет долгосрочные последствия
+- Игрок видит результат своих действий (база обескровлена)
+- Балансируется через конфигурацию
+
+### Reservation Pattern for Units
+
+**Проблема:** Как гарантировать, что юниты не будут заспавнены дважды при параллельных запросах?
+
+**Решение:** Three-phase spawn protocol
+```csharp
+// Phase 1: Check availability
+if (!_unitEconomy.CanSpawnUnit(colony, UnitType.Guard, 10))
+{
+    // Reduce request or abort
+}
+
+// Phase 2: Reserve units (atomic operation)
+if (!_unitEconomy.ReserveUnits(colony, UnitType.Guard, 10))
+{
+    // Already reserved by another request
+    return;
+}
+
+// Phase 3: Spawn and register
+var spawnedIds = await _entitySpawner.SpawnNPCGroupAsync(...);
+foreach (var id in spawnedIds)
+{
+    _unitEconomy.RegisterActiveUnit(colony, id, UnitType.Guard, "Defender");
+}
+```
+
+**Гарантии:**
+- Резервирование атомарно (уменьшает счетчик доступных)
+- Неудачный спавн НЕ возвращает юниты (потеря считается)
+- Успешный спавн регистрирует юнит для отслеживания
+
+### Production Distribution Priority Pattern
+
+**Проблема:** В каком порядке пополнять разные типы юнитов при производстве?
+
+**Решение:** Priority-based distribution
+```csharp
+private void DistributeProducedUnits(Colony colony, int totalUnits)
+{
+    var remaining = totalUnits;
+    
+    // Priority 1: Guards (основная защита)
+    remaining = FillUnitType(colony.UnitPool.AvailableGuards, 
+                            colony.UnitPool.MaxGuards, remaining);
+    
+    // Priority 2: Drones (волны атак)
+    remaining = FillUnitType(colony.UnitPool.AvailableDrones,
+                            colony.UnitPool.MaxDrones, remaining);
+    
+    // Priority 3: PatrolVessels (if stage allows)
+    if (colony.Stage >= ColonyStage.BaseL1)
+        remaining = FillUnitType(...);
+    
+    // Priority 4: Warships (if stage allows)
+    if (colony.Stage >= ColonyStage.BaseL2)
+        remaining = FillUnitType(...);
+}
+```
+
+**Приоритеты:**
+1. Guards — базовая защита (всегда нужны)
+2. Drones — волны атак (дешевые, массовые)
+3. PatrolVessels — патрулирование (средняя стоимость)
+4. Warships — тяжелая артиллерия (дорогие, требуют верфь)
+
 ---
 
 ## Паттерны безопасности
@@ -291,6 +415,10 @@ var placement = new PlacementResolver(seed: 42);
 7. **Охота только на онлайн игроков** (оффлайн топ для экспансии)
 8. **Родная планета определяется по структурам** (max count → max blocks)
 9. **Экспансия постепенная** (планета за планетой, не прямой прыжок на цель)
+10. **Юниты резервируются перед спавном** (CanSpawn → Reserve → Spawn → Register)
+11. **Потерянные юниты НЕ возвращаются** (нужно ждать производства новых)
+12. **AvailableUnits ≤ MaxUnits** (всегда соблюдается при пересчете вместимости)
+13. **ProductionRate ≥ 0** (никогда не отрицательная, даже при всех штрафах)
 
 ---
 
@@ -300,4 +428,8 @@ var placement = new PlacementResolver(seed: 42);
 ❌ **Синхронные API вызовы** → Всегда async/await  
 ❌ **Хардкод значений** → Все через конфигурацию  
 ❌ **Игнорирование ошибок** → Всегда try-catch + логирование  
-❌ **Блокирующие операции в simulation tick** → Offload в background
+❌ **Блокирующие операции в simulation tick** → Offload в background  
+❌ **Спавн без резервирования** → Всегда Reserve перед Spawn  
+❌ **Мгновенное восполнение юнитов** → Используй производство с течением времени  
+❌ **Игнорирование разрушений инфраструктуры** → Пересчитывай ProductionRate  
+❌ **Возврат юнитов при неудачном спавне** → Потери считаются окончательными

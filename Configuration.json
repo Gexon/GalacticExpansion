@@ -131,6 +131,82 @@
       "ExpansionChancePercent": 75
     }
   },
+  "UnitEconomy": {
+    "Enabled": true,
+    "StageCapacity": {
+      "ConstructionYard": {
+        "MaxGuards": 2,
+        "MaxPatrolVessels": 0,
+        "MaxWarships": 0,
+        "MaxDrones": 5,
+        "ProductionRatePerHour": 1.0
+      },
+      "BaseL1": {
+        "MaxGuards": 6,
+        "MaxPatrolVessels": 1,
+        "MaxWarships": 0,
+        "MaxDrones": 10,
+        "ProductionRatePerHour": 2.0
+      },
+      "BaseL2": {
+        "MaxGuards": 10,
+        "MaxPatrolVessels": 2,
+        "MaxWarships": 1,
+        "MaxDrones": 20,
+        "ProductionRatePerHour": 3.5
+      },
+      "BaseL3": {
+        "MaxGuards": 15,
+        "MaxPatrolVessels": 3,
+        "MaxWarships": 2,
+        "MaxDrones": 30,
+        "ProductionRatePerHour": 5.0
+      },
+      "BaseMax": {
+        "MaxGuards": 20,
+        "MaxPatrolVessels": 4,
+        "MaxWarships": 3,
+        "MaxDrones": 50,
+        "ProductionRatePerHour": 8.0
+      }
+    },
+    "UnitProductionCosts": {
+      "Guard": {
+        "ResourceCost": 50,
+        "ProductionTimeSeconds": 300,
+        "MinimumStage": "ConstructionYard"
+      },
+      "PatrolVessel": {
+        "ResourceCost": 500,
+        "ProductionTimeSeconds": 1800,
+        "MinimumStage": "BaseL1",
+        "RequiresShipyard": false
+      },
+      "Warship": {
+        "ResourceCost": 2000,
+        "ProductionTimeSeconds": 3600,
+        "MinimumStage": "BaseL2",
+        "RequiresShipyard": true
+      },
+      "Drone": {
+        "ResourceCost": 20,
+        "ProductionTimeSeconds": 60,
+        "MinimumStage": "ConstructionYard",
+        "RequiresDroneBase": false
+      },
+      "EliteHunter": {
+        "ResourceCost": 200,
+        "ProductionTimeSeconds": 600,
+        "MinimumStage": "BaseL2"
+      }
+    },
+    "ProductionModifiers": {
+      "ResourceOutpostBonus": 0.25,
+      "ShipyardBonus": 0.5,
+      "DroneBaseBonus": 1.0,
+      "UnderAttackPenalty": -0.3
+    }
+  },
   "Prefabs": {
     "ColonyStages": {
       "LandingPad": "BA_ConstructionSite",

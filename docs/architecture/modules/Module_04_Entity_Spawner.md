@@ -302,8 +302,9 @@ var timeout = prefabName.Contains("Huge") ? 30000 : 10000;
 - **[Module_02_EmpyrionGateway.md](Module_02_EmpyrionGateway.md)** — API запросы
 - **[Module_06_Placement_Resolver.md](Module_06_Placement_Resolver.md)** — поиск мест
 - **[Module_07_Colony_Evolution.md](Module_07_Colony_Evolution.md)** — использует EntitySpawner
+- **[Module_13_Unit_Economy.md](Module_13_Unit_Economy.md)** — резервирование юнитов перед спавном ✨ НОВОЕ
 
 ---
 
-**Последнее обновление:** 28.01.2026  
+**Последнее обновление:** 29.01.2026  
 **Размер:** ~360 строк
