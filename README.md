@@ -181,6 +181,19 @@ GalacticExpansion/
    - Следовать Phase 1 из [Modular Development Plan](docs/architecture/04_Modular_Development_Plan.md)
    - Первый модуль: Empyrion Gateway
 
+### Сборка и развертывание
+
+**После успешной сборки проекта:**
+
+```cmd
+# Автоматическое развертывание мода
+cd tools
+deploy_mod.cmd Release
+
+# Просмотр логов сервера
+view_logs.cmd
+```
+
 ### Стандарты кода
 
 - C# Coding Conventions

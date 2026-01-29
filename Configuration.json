@@ -1,0 +1,162 @@
+{
+  "Version": "1.0",
+  "LogLevel": "Information",
+  "Simulation": {
+    "TickIntervalMs": 1000,
+    "SaveIntervalMinutes": 1,
+    "StateBackupIntervalHours": 24,
+    "KeepBackupCount": 10
+  },
+  "HomePlayfield": "Akua",
+  "EnableExpansion": true,
+  "Limits": {
+    "MaxColoniesPerPlayfield": 1,
+    "MaxActiveAIVessels": 5,
+    "MaxGuardsNearColony": 10,
+    "MaxBuildersNearColony": 5,
+    "MaxResourceOutposts": 3,
+    "MaxAIMCommandsPerMinute": 10
+  },
+  "ColonyEvolution": {
+    "TriggerPlayerPresenceSeconds": 0,
+    "StageDurations": {
+      "None": 0,
+      "LandingPad": 300,
+      "Outpost": 600,
+      "SmallBase": 900,
+      "MediumBase": 1200,
+      "LargeBase": 1800,
+      "Fortress": 2400
+    },
+    "BuildSpeedMultipliers": {
+      "PlayerNearbySlowdown": 0.5,
+      "BuilderBoost": 1.2,
+      "UnderAttackSlowdown": 0.2
+    }
+  },
+  "Economy": {
+    "EnableResourceSimulation": true,
+    "ResourceGatherRatePerHour": {
+      "Iron": 100,
+      "Copper": 80,
+      "Silicon": 60,
+      "Promethium": 40,
+      "Cobalt": 30
+    },
+    "StageCosts": {
+      "LandingPad": {
+        "Iron": 100,
+        "Copper": 50
+      },
+      "Outpost": {
+        "Iron": 300,
+        "Copper": 150,
+        "Silicon": 100
+      },
+      "SmallBase": {
+        "Iron": 600,
+        "Copper": 300,
+        "Silicon": 200,
+        "Promethium": 100
+      },
+      "MediumBase": {
+        "Iron": 1200,
+        "Copper": 600,
+        "Silicon": 400,
+        "Promethium": 200,
+        "Cobalt": 100
+      },
+      "LargeBase": {
+        "Iron": 2400,
+        "Copper": 1200,
+        "Silicon": 800,
+        "Promethium": 400,
+        "Cobalt": 200
+      },
+      "Fortress": {
+        "Iron": 4800,
+        "Copper": 2400,
+        "Silicon": 1600,
+        "Promethium": 800,
+        "Cobalt": 400
+      }
+    },
+    "InitialResources": {
+      "Iron": 500,
+      "Copper": 300,
+      "Silicon": 200
+    }
+  },
+  "ThreatDirector": {
+    "EnableDynamicThreat": true,
+    "DetectionRadius": 2000,
+    "CheckIntervalSeconds": 30,
+    "ResponseIntensity": {
+      "BasePatrolCount": 2,
+      "PatrolsPerPlayer": 1,
+      "MaxConcurrentPatrols": 5,
+      "WaveIntervalMinutes": 15
+    }
+  },
+  "Hostility": {
+    "EnableHostilityTracking": true,
+    "EnableMostWantedSystem": true,
+    "DecayOnDeathPercent": 5,
+    "HostilityRanks": {
+      "Unknown": 0,
+      "Suspect": 10,
+      "Troublemaker": 50,
+      "Enemy": 100,
+      "Archenemy": 250,
+      "Genocider": 500
+    },
+    "HostilityCosts": {
+      "KillGuard": 5,
+      "KillBuilder": 10,
+      "DestroyStructureBlock": 1,
+      "DestroyResourceOutpost": 50,
+      "DestroyLogisticsVessel": 30,
+      "StealResources": 20
+    },
+    "DefenseModifiers": {
+      "Unknown": 1.0,
+      "Suspect": 1.1,
+      "Troublemaker": 1.25,
+      "Enemy": 1.5,
+      "Archenemy": 2.0,
+      "Genocider": 3.0
+    },
+    "TargetExpansion": {
+      "MinRankForExpansion": "Enemy",
+      "ExpansionChancePercent": 75
+    }
+  },
+  "Prefabs": {
+    "ColonyStages": {
+      "LandingPad": "BA_ConstructionSite",
+      "Outpost": "BA_Zirax_Small_1",
+      "SmallBase": "BA_Zirax_Small_2",
+      "MediumBase": "BA_Zirax_Medium_1",
+      "LargeBase": "BA_Zirax_Large_1",
+      "Fortress": "BA_Zirax_Fortress_1"
+    },
+    "ResourceOutposts": [
+      "BA_MiningOutpost_Zirax_1",
+      "BA_MiningOutpost_Zirax_2"
+    ],
+    "LogisticsVessels": [
+      "CV_Freighter_Zirax_1",
+      "CV_Cargo_Zirax_1"
+    ],
+    "PatrolVessels": [
+      "CV_Patrol_Zirax_1",
+      "CV_Patrol_Zirax_2"
+    ]
+  },
+  "Advanced": {
+    "EnableVerboseLogging": false,
+    "EnablePerformanceMetrics": false,
+    "EnableTestMode": false,
+    "TestModeTimeMultiplier": 10.0
+  }
+}
