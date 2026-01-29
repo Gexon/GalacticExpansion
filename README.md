@@ -180,6 +180,7 @@ GalacticExpansion/
 **Документация:** `docs/architecture/`  
 **Примеры:** `docs/examples/`  
 **Вопросы:** Создайте Issue в репозитории
+**Записи стримов** https://live.vkvideo.ru/wobportal
 
 ---
 
