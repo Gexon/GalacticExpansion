@@ -213,11 +213,20 @@ namespace GalacticExpansion.Models
         [JsonProperty("AssignedRole")]
         public string? AssignedRole { get; set; }
 
+        /// <summary>
+        /// Конструктор по умолчанию. Устанавливает время появления на текущее UTC время.
+        /// </summary>
         public ActiveUnit()
         {
             SpawnedAt = DateTime.UtcNow;
         }
 
+        /// <summary>
+        /// Конструктор с параметрами. Создает активный юнит с указанными характеристиками.
+        /// </summary>
+        /// <param name="entityId">ID сущности в игре</param>
+        /// <param name="type">Тип юнита</param>
+        /// <param name="role">Роль юнита (опционально)</param>
         public ActiveUnit(int entityId, string type, string? role = null)
         {
             EntityId = entityId;

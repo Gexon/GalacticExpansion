@@ -16,7 +16,7 @@
 ### Внешние зависимости
 
 **Обязательные (от Empyrion):**
-- `Eleon.Modding.dll` — интерфейсы ModAPI
+- `ModApi.dll` — интерфейсы ModAPI
 - `Mif.dll` — ModInterface Framework
 
 ---

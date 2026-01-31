@@ -1,4 +1,4 @@
-дusing System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,7 +23,7 @@ namespace GalacticExpansion.Core.Gateway
         private static readonly ILogger Logger = LogManager.GetCurrentClassLogger();
 
         // Очередь с приоритетами (меньший приоритет = выше в очереди)
-        private readonly SortedDictionary<int, Queue<QueuedRequest>> _priorityQueues = new();
+        private readonly SortedDictionary<int, Queue<QueuedRequest>> _priorityQueues = new SortedDictionary<int, Queue<QueuedRequest>>();
         
         private readonly RateLimiter _rateLimiter;
         private readonly SemaphoreSlim _concurrencySemaphore;

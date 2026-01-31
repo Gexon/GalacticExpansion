@@ -28,6 +28,7 @@ namespace GalacticExpansion
         private IStateStore? _stateStore;
         private SimulationState? _currentState;
         private Configuration? _config;
+        private ModGameAPI? _modApi;
         
         private DateTime _lastSaveTime;
         private DateTime _lastBackupTime;
@@ -36,7 +37,7 @@ namespace GalacticExpansion
         /// Инициализация мода.
         /// Вызывается при запуске dedicated server.
         /// </summary>
-        public void Init(IModApi modApi)
+        public void Game_Start(ModGameAPI dediAPI)
         {
             try
             {
@@ -50,8 +51,17 @@ namespace GalacticExpansion
                 _logger.Info("========================================");
 
                 // 2. Определяем путь к папке мода
-                var modPath = modApi.Application.GetPathFor(AppFolder.Mod);
+                // AppDomain.CurrentDomain.BaseDirectory = "D:\...\DedicatedServer\"
+                // Нужно подняться на уровень выше, чтобы попасть в корень игры
+                var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                var modPath = System.IO.Path.Combine(
+                    gameRoot,
+                    "Content", "Mods", "GalacticExpansion"
+                );
                 _logger.Info($"Mod path: {modPath}");
+
+                // Сохраняем ссылку на ModGameAPI
+                _modApi = dediAPI;
 
                 // 3. Загружаем конфигурацию
                 _logger.Info("Loading configuration...");
@@ -65,13 +75,13 @@ namespace GalacticExpansion
                 _logger.Info("Setting up dependency injection...");
                 _container = new ServiceContainer();
                 _container.Register<ILogger>(_logger);
-                _container.Register<IModApi>(modApi);
+                _container.Register<ModGameAPI>(_modApi);
                 _container.Register<Configuration>(_config);
 
                 // 5. Инициализируем Gateway
                 _logger.Info("Initializing Empyrion Gateway...");
                 _gateway = new EmpyrionGateway(
-                    modApi, 
+                    _modApi, 
                     _config.Limits.MaxRequestsPerSecond
                 );
                 _container.Register<IEmpyrionGateway>(_gateway);
@@ -170,7 +180,7 @@ namespace GalacticExpansion
         /// Graceful shutdown мода.
         /// Вызывается при остановке dedicated server.
         /// </summary>
-        public void Shutdown()
+        public void Game_Exit()
         {
             try
             {

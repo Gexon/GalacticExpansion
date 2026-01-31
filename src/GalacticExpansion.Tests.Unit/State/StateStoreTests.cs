@@ -82,7 +82,7 @@ namespace GalacticExpansion.Tests.Unit.State
 
             // Assert
             Assert.NotNull(loadedState);
-            Assert.Equal(1, loadedState.Colonies.Count);
+            Assert.Single(loadedState.Colonies);
             
             var loadedColony = loadedState.Colonies[0];
             Assert.Equal("Akua", loadedColony.Playfield);
@@ -131,7 +131,7 @@ namespace GalacticExpansion.Tests.Unit.State
 
             // Assert
             Assert.NotNull(restoredState);
-            Assert.Equal(1, restoredState.Colonies.Count);
+            Assert.Single(restoredState.Colonies);
             // Должна восстановиться последняя версия (state2)
             Assert.Equal("Omicron", restoredState.Colonies[0].Playfield);
         }

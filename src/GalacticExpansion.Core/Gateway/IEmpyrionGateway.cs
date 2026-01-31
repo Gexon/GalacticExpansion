@@ -37,6 +37,12 @@ namespace GalacticExpansion.Core.Gateway
         event EventHandler<GameEventArgs> GameEventReceived;
 
         /// <summary>
+        /// Обрабатывает событие от ModAPI.
+        /// Вызывается из ModInterface.Game_Event().
+        /// </summary>
+        void HandleEvent(CmdId eventId, ushort seqNr, object data);
+
+        /// <summary>
         /// Запускает Gateway и начинает обработку запросов и событий.
         /// Должен быть вызван в ModInterface.Init().
         /// </summary>

@@ -22,7 +22,7 @@ namespace GalacticExpansion.Core.Gateway
     {
         private static readonly ILogger Logger = LogManager.GetCurrentClassLogger();
 
-        private readonly IModApi _modApi;
+        private readonly ModGameAPI _modApi;
         private readonly SequenceManager _sequenceManager;
         private readonly RateLimiter _rateLimiter;
         private readonly RequestQueue _requestQueue;
@@ -44,7 +44,7 @@ namespace GalacticExpansion.Core.Gateway
         /// </summary>
         /// <param name="modApi">Интерфейс ModAPI от Empyrion</param>
         /// <param name="maxRequestsPerSecond">Максимальное количество запросов в секунду</param>
-        public EmpyrionGateway(IModApi modApi, int maxRequestsPerSecond = 10)
+        public EmpyrionGateway(ModGameAPI modApi, int maxRequestsPerSecond = 10)
         {
             _modApi = modApi ?? throw new ArgumentNullException(nameof(modApi));
             _sequenceManager = new SequenceManager();
@@ -254,6 +254,10 @@ namespace GalacticExpansion.Core.Gateway
         /// </summary>
         public float AvailableTokens { get; set; }
 
+        /// <summary>
+        /// Преобразует статистику Gateway в строковое представление.
+        /// </summary>
+        /// <returns>Строка с информацией о состоянии Gateway</returns>
         public override string ToString()
         {
             return $"Gateway [Running: {IsRunning}, Pending: {PendingRequests}, Queued: {QueuedRequests}, Tokens: {AvailableTokens:F1}]";

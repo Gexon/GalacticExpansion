@@ -24,8 +24,8 @@
   <!-- Ссылки на Empyrion DLL (будут добавлены вручную после установки игры) -->
   <!-- Для корректной работы эти DLL должны находиться в папке lib/ -->
   <ItemGroup>
-    <Reference Include="Eleon.Modding">
-      <HintPath>..\..\lib\Eleon.Modding.dll</HintPath>
+    <Reference Include="ModApi">
+      <HintPath>..\..\lib\ModApi.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Mif">

@@ -70,6 +70,10 @@ namespace GalacticExpansion.Models
             return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
+        /// <summary>
+        /// Преобразует вектор в строковое представление формата (X, Y, Z).
+        /// </summary>
+        /// <returns>Строковое представление вектора</returns>
         public override string ToString()
         {
             return $"({X:F1}, {Y:F1}, {Z:F1})";

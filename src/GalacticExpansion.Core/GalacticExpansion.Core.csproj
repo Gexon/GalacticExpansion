@@ -20,8 +20,12 @@
 
   <!-- Ссылки на Empyrion DLL для Gateway -->
   <ItemGroup>
-    <Reference Include="Eleon.Modding">
-      <HintPath>..\..\lib\Eleon.Modding.dll</HintPath>
+    <Reference Include="ModApi">
+      <HintPath>..\..\lib\ModApi.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Mif">
+      <HintPath>..\..\lib\Mif.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>

@@ -82,7 +82,7 @@ namespace GalacticExpansion.Core.State
 
                 Logger.Info($"Loading state from {_statePath}...");
                 
-                var json = await File.ReadAllTextAsync(_statePath);
+                var json = File.ReadAllText(_statePath);
                 var state = JsonConvert.DeserializeObject<SimulationState>(json, _jsonSettings);
 
                 if (state == null)
@@ -146,11 +146,15 @@ namespace GalacticExpansion.Core.State
                 var tempPath = _statePath + ".tmp";
                 
                 // Записываем во временный файл
-                await File.WriteAllTextAsync(tempPath, json);
+                File.WriteAllText(tempPath, json);
 
                 // Атомарно заменяем основной файл
-                // File.Move с overwrite=true атомарен на Windows и Linux
-                File.Move(tempPath, _statePath, overwrite: true);
+                // Удаляем старый файл, если есть, затем переименовываем
+                if (File.Exists(_statePath))
+                {
+                    File.Delete(_statePath);
+                }
+                File.Move(tempPath, _statePath);
 
                 Logger.Info($"State saved successfully (version: {state.Version}, colonies: {state.Colonies.Count}, size: {json.Length} bytes)");
             }
@@ -224,7 +228,7 @@ namespace GalacticExpansion.Core.State
                     {
                         Logger.Info($"Trying to restore from {Path.GetFileName(backupFile)}...");
                         
-                        var json = await File.ReadAllTextAsync(backupFile);
+                        var json = File.ReadAllText(backupFile);
                         var state = JsonConvert.DeserializeObject<SimulationState>(json, _jsonSettings);
 
                         if (state != null)

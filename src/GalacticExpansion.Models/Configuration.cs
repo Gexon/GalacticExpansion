@@ -207,15 +207,27 @@ namespace GalacticExpansion.Models
     [JsonObject(MemberSerialization.OptIn)]
     public class DropShipConfig
     {
+        /// <summary>
+        /// Название префаба десантного корабля
+        /// </summary>
         [JsonProperty("PrefabName")]
         public string PrefabName { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Тип корабля (SV, CV, HV)
+        /// </summary>
         [JsonProperty("Type")]
         public string Type { get; set; } = "SV";
 
+        /// <summary>
+        /// Высота появления десантного корабля в метрах
+        /// </summary>
         [JsonProperty("SpawnAltitude")]
         public float SpawnAltitude { get; set; } = 500f;
 
+        /// <summary>
+        /// Длительность полета до цели в секундах
+        /// </summary>
         [JsonProperty("FlightDurationSeconds")]
         public int FlightDurationSeconds { get; set; } = 30;
     }
@@ -226,18 +238,33 @@ namespace GalacticExpansion.Models
     [JsonObject(MemberSerialization.OptIn)]
     public class StageConfig
     {
+        /// <summary>
+        /// Название стадии (ConstructionYard, BaseL1, BaseL2, BaseL3, BaseMax)
+        /// </summary>
         [JsonProperty("Stage")]
         public string Stage { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Название префаба структуры для этой стадии
+        /// </summary>
         [JsonProperty("PrefabName")]
         public string PrefabName { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Количество ресурсов, необходимое для достижения стадии
+        /// </summary>
         [JsonProperty("RequiredResources")]
         public float RequiredResources { get; set; }
 
+        /// <summary>
+        /// Скорость производства ресурсов на этой стадии (ед/час)
+        /// </summary>
         [JsonProperty("ProductionRate")]
         public float ProductionRate { get; set; }
 
+        /// <summary>
+        /// Минимальное время в секундах для достижения этой стадии
+        /// </summary>
         [JsonProperty("MinTimeSeconds")]
         public int MinTimeSeconds { get; set; }
     }
@@ -248,12 +275,21 @@ namespace GalacticExpansion.Models
     [JsonObject(MemberSerialization.OptIn)]
     public class ResourceOutpostConfig
     {
+        /// <summary>
+        /// Тип добываемого ресурса (Iron, Copper, Promethium и т.д.)
+        /// </summary>
         [JsonProperty("Type")]
         public string Type { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Название префаба аванпоста
+        /// </summary>
         [JsonProperty("PrefabName")]
         public string PrefabName { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Скорость добычи ресурса (ед/час)
+        /// </summary>
         [JsonProperty("ProductionRate")]
         public float ProductionRate { get; set; }
     }
@@ -264,85 +300,139 @@ namespace GalacticExpansion.Models
     [JsonObject(MemberSerialization.OptIn)]
     public class GuardConfig
     {
+        /// <summary>
+        /// Тип охранника (ZiraxMale, ZiraxFemale и т.д.)
+        /// </summary>
         [JsonProperty("Type")]
         public string Type { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Количество охранников этого типа
+        /// </summary>
         [JsonProperty("Count")]
         public int Count { get; set; }
     }
 
     /// <summary>
-    /// Настройки AIM
+    /// Настройки AIM (AI Manager - система управления AI)
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class AIMSettings
     {
+        /// <summary>
+        /// Список разрешенных AIM команд для управления AI
+        /// </summary>
         [JsonProperty("AllowedCommands")]
         public List<string> AllowedCommands { get; set; } = new List<string> { "aim aga", "aim tdw", "aim adb" };
 
+        /// <summary>
+        /// Максимальное количество AIM команд в минуту (rate limiting)
+        /// </summary>
         [JsonProperty("RateLimitPerMinute")]
         public int RateLimitPerMinute { get; set; } = 10;
 
+        /// <summary>
+        /// Радиус патрулирования охранников по умолчанию (в метрах)
+        /// </summary>
         [JsonProperty("DefaultGuardRange")]
         public int DefaultGuardRange { get; set; } = 500;
 
+        /// <summary>
+        /// Время ожидания между волнами дронов (в минутах)
+        /// </summary>
         [JsonProperty("DroneWaveCooldownMinutes")]
         public int DroneWaveCooldownMinutes { get; set; } = 15;
     }
 
     /// <summary>
-    /// Настройки размещения структур
+    /// Настройки размещения структур в игровом мире
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class PlacementSettings
     {
+        /// <summary>
+        /// Минимальное расстояние от игроков при размещении структур (в метрах)
+        /// </summary>
         [JsonProperty("MinDistanceFromPlayers")]
         public float MinDistanceFromPlayers { get; set; } = 500f;
 
+        /// <summary>
+        /// Минимальное расстояние от структур игроков при размещении (в метрах)
+        /// </summary>
         [JsonProperty("MinDistanceFromPlayerStructures")]
         public float MinDistanceFromPlayerStructures { get; set; } = 1000f;
 
+        /// <summary>
+        /// Радиус поиска подходящего места для размещения структуры (в метрах)
+        /// </summary>
         [JsonProperty("SearchRadius")]
         public float SearchRadius { get; set; } = 2000f;
 
+        /// <summary>
+        /// Предпочтительная высота размещения структур (в метрах над уровнем моря)
+        /// </summary>
         [JsonProperty("PreferredAltitude")]
         public float PreferredAltitude { get; set; } = 150f;
 
+        /// <summary>
+        /// Максимальное количество попыток найти подходящее место для размещения
+        /// </summary>
         [JsonProperty("MaxPlacementAttempts")]
         public int MaxPlacementAttempts { get; set; } = 10;
     }
 
     /// <summary>
-    /// Настройки системы угроз
+    /// Настройки системы расчета уровня угрозы
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class ThreatSettings
     {
+        /// <summary>
+        /// Вес влияния близости игроков на уровень угрозы
+        /// </summary>
         [JsonProperty("PlayerProximityWeight")]
         public float PlayerProximityWeight { get; set; } = 10f;
 
+        /// <summary>
+        /// Вес влияния разрушения структур на уровень угрозы
+        /// </summary>
         [JsonProperty("DestructionWeight")]
         public float DestructionWeight { get; set; } = 20f;
 
+        /// <summary>
+        /// Время затухания эффекта атаки на уровень угрозы (в минутах)
+        /// </summary>
         [JsonProperty("AttackDecayMinutes")]
         public int AttackDecayMinutes { get; set; } = 60;
 
+        /// <summary>
+        /// Вес влияния стадии развития колонии на уровень угрозы
+        /// </summary>
         [JsonProperty("StageValueWeight")]
         public float StageValueWeight { get; set; } = 5f;
     }
 
     /// <summary>
-    /// Настройки экспансии
+    /// Настройки экспансии колоний на другие планеты
     /// </summary>
     [JsonObject(MemberSerialization.OptIn)]
     public class ExpansionSettings
     {
+        /// <summary>
+        /// Список целевых плейфилдов для экспансии
+        /// </summary>
         [JsonProperty("TargetPlayfields")]
         public List<string> TargetPlayfields { get; set; } = new List<string> { "Omicron", "Ningues", "Tallodar" };
 
+        /// <summary>
+        /// Время путешествия до целевого плейфилда (в минутах)
+        /// </summary>
         [JsonProperty("TravelTimeMinutes")]
         public int TravelTimeMinutes { get; set; } = 30;
 
+        /// <summary>
+        /// Минимальное время с момента достижения максимальной стадии до начала экспансии (в минутах)
+        /// </summary>
         [JsonProperty("MinTimeSinceMaxStageMinutes")]
         public int MinTimeSinceMaxStageMinutes { get; set; } = 120;
     }

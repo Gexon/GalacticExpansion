@@ -25,7 +25,7 @@ namespace GalacticExpansion.Core.Gateway
         private int _currentSeq = 0;
 
         // Словарь ожидающих ответов: SeqNr -> PendingResponse
-        private readonly ConcurrentDictionary<ushort, PendingResponse> _pendingResponses = new();
+        private readonly ConcurrentDictionary<ushort, PendingResponse> _pendingResponses = new ConcurrentDictionary<ushort, PendingResponse>();
 
         /// <summary>
         /// Генерирует следующий уникальный sequence number.

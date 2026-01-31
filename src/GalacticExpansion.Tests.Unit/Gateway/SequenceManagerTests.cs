@@ -96,7 +96,7 @@ namespace GalacticExpansion.Tests.Unit.Gateway
         }
 
         [Fact]
-        public void CancelAll_CancelsAllPendingRequests()
+        public async Task CancelAll_CancelsAllPendingRequests()
         {
             // Arrange
             var manager = new SequenceManager();
@@ -112,9 +112,9 @@ namespace GalacticExpansion.Tests.Unit.Gateway
             manager.CancelAll();
 
             // Assert
-            Assert.ThrowsAsync<OperationCanceledException>(() => task1);
-            Assert.ThrowsAsync<OperationCanceledException>(() => task2);
-            Assert.ThrowsAsync<OperationCanceledException>(() => task3);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => task1);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => task2);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => task3);
             Assert.Equal(0, manager.PendingCount);
         }
 
