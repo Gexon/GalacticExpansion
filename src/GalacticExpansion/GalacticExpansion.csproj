@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>8.0</LangVersion>
+    <OutputType>Library</OutputType>
+    <AssemblyName>GalacticExpansion</AssemblyName>
+    <RootNamespace>GalacticExpansion</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Nullable>enable</Nullable>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GalacticExpansion.Core\GalacticExpansion.Core.csproj" />
+    <ProjectReference Include="..\GalacticExpansion.Models\GalacticExpansion.Models.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NLog" Version="5.3.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!-- Ссылки на Empyrion DLL (будут добавлены вручную после установки игры) -->
+  <!-- Для корректной работы эти DLL должны находиться в папке lib/ -->
+  <ItemGroup>
+    <Reference Include="Eleon.Modding">
+      <HintPath>..\..\lib\Eleon.Modding.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Mif">
+      <HintPath>..\..\lib\Mif.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Копирование NLog.config в выходную папку -->
+  <ItemGroup>
+    <None Include="NLog.config" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
