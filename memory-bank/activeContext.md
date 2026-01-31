@@ -2,12 +2,52 @@
 
 ## Текущее состояние проекта
 
-**Дата обновления:** 30.01.2026  
-**Фаза:** Phase 1 Foundation COMPLETED! Готов к первому запуску на dedicated server
+**Дата обновления:** 31.01.2026  
+**Фаза:** Phase 1 Foundation COMPLETED! ✅ Логирование исправлено, готов к полноценному запуску
 
 ---
 
 ## Недавние изменения
+
+### 31.01.2026 — ИСПРАВЛЕНО: Проблема с логированием NLog
+
+**Проблема:**
+- Логи мода не создавались в `Content/Mods/GalacticExpansion/Logs/`
+- FATAL ошибка `ArgumentNullException` при регистрации логгера в DI-контейнере
+
+**Причины:**
+1. **NLog не находил конфиг:** `AppDomain.CurrentDomain.BaseDirectory` указывает на `DedicatedServer\`, а не на папку мода
+2. **Nullable логгер:** `_logger` был объявлен как `ILogger?`, что вызывало ошибку при регистрации
+
+**Решение:**
+1. ✅ Явная загрузка `NLog.config` через `XmlLoggingConfiguration` с полным путем к файлу
+2. ✅ Добавлена проверка на null при регистрации логгера в DI
+3. ✅ Добавлен параметр `createDirs="true"` в NLog.config для автоматического создания папок
+
+**Код исправления:**
+```csharp
+// ModMain.cs::InitializeLogging()
+var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+var nlogConfigPath = System.IO.Path.Combine(modPath, "NLog.config");
+LogManager.Configuration = new XmlLoggingConfiguration(nlogConfigPath);
+
+// ModMain.cs::Game_Start()
+if (_logger != null)
+    _container.Register<ILogger>(_logger);
+```
+
+**Результат:**
+- ✅ Логи создаются в `Content/Mods/GalacticExpansion/Logs/`
+- ✅ `GLEX_yyyy-MM-dd.log` — основной лог (Debug+)
+- ✅ `GLEX_errors_yyyy-MM-dd.log` — лог ошибок (Error+, Fatal+)
+- ✅ Автоматическая архивация каждый день (7 дней хранения)
+- ✅ Мод работает без FATAL ошибок
+
+**Новые инструменты:**
+- ✅ `tools\view_logs.cmd` — автоматическое копирование логов в `logs\` папку проекта
+- ✅ `tools\check_mod.cmd` — быстрая диагностика состояния мода
+- ✅ `logs\` — папка для локальных копий логов (в .gitignore)
 
 ### 30.01.2026 — ЗАВЕРШЕНА Phase 1: Foundation
 

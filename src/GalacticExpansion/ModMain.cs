@@ -74,7 +74,11 @@ namespace GalacticExpansion
                 // 4. Создаем DI контейнер и регистрируем сервисы
                 _logger.Info("Setting up dependency injection...");
                 _container = new ServiceContainer();
-                _container.Register<ILogger>(_logger);
+                
+                // Регистрируем логгер (явно проверяем на null для компилятора)
+                if (_logger != null)
+                    _container.Register<ILogger>(_logger);
+                
                 _container.Register<ModGameAPI>(_modApi);
                 _container.Register<Configuration>(_config);
 
@@ -223,14 +227,48 @@ namespace GalacticExpansion
         }
 
         /// <summary>
-        /// Инициализирует систему логирования NLog
+        /// Инициализирует систему логирования NLog.
+        /// 
+        /// NLog не может автоматически найти конфиг, потому что мод загружается из Content/Mods/,
+        /// но AppDomain.CurrentDomain.BaseDirectory указывает на DedicatedServer\.
+        /// Поэтому нужно явно указать путь к NLog.config в папке мода.
         /// </summary>
         private void InitializeLogging()
         {
-            // NLog должен автоматически найти NLog.config в папке мода
-            // Если конфиг не найден, используем программную конфигурацию
-            if (LogManager.Configuration == null)
+            try
             {
+                // Определяем путь к папке мода
+                // AppDomain.CurrentDomain.BaseDirectory = "D:\...\DedicatedServer\"
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var gameRoot = System.IO.Path.GetDirectoryName(baseDir);
+                var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                var nlogConfigPath = System.IO.Path.Combine(modPath, "NLog.config");
+
+                // Пробуем загрузить конфигурацию из NLog.config в папке мода
+                if (System.IO.File.Exists(nlogConfigPath))
+                {
+                    LogManager.Configuration = new XmlLoggingConfiguration(nlogConfigPath);
+                }
+                else
+                {
+                    // Конфиг не найден - используем минимальную программную конфигурацию (только консоль)
+                    var config = new LoggingConfiguration();
+                    var consoleTarget = new NLog.Targets.ConsoleTarget("console")
+                    {
+                        Layout = "${time}|${level:uppercase=true:truncate=5}|${logger:shortName=true}|${message}"
+                    };
+                    config.AddRule(LogLevel.Debug, LogLevel.Fatal, consoleTarget);
+                    LogManager.Configuration = config;
+                    
+                    // Выводим предупреждение в консоль
+                    var tempLogger = LogManager.GetCurrentClassLogger();
+                    tempLogger.Warn($"NLog.config not found at: {nlogConfigPath}");
+                    tempLogger.Warn("Using console-only logging configuration");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Критическая ошибка при инициализации NLog - используем fallback конфигурацию
                 var config = new LoggingConfiguration();
                 var consoleTarget = new NLog.Targets.ConsoleTarget("console")
                 {
@@ -238,6 +276,9 @@ namespace GalacticExpansion
                 };
                 config.AddRule(LogLevel.Debug, LogLevel.Fatal, consoleTarget);
                 LogManager.Configuration = config;
+                
+                var tempLogger = LogManager.GetCurrentClassLogger();
+                tempLogger.Error(ex, "Failed to initialize NLog configuration");
             }
         }
 

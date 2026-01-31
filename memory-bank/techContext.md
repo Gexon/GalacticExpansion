@@ -180,14 +180,30 @@ GalacticExpansion/
 - `Information` — нормальная работа (по умолчанию)
 - `Warning` — предупреждения
 - `Error` — ошибки
-- `Critical` — критичные ошибки
+- `Fatal` — критичные ошибки
 
-**Файлы:** `Logs/GLEX_yyyyMMdd.log`
+**Расположение логов:** `Content/Mods/GalacticExpansion/Logs/`
+
+**Файлы:**
+- `GLEX_yyyy-MM-dd.log` — основной лог (Debug и выше)
+- `GLEX_errors_yyyy-MM-dd.log` — лог ошибок (Error и Fatal)
+- `archives/` — архив старых логов (7 дней хранения)
 
 **Формат:**
 ```
-[timestamp] [level] [module] message
+[timestamp]|[level]|[module]|message
 ```
+
+**Важно:** NLog требует явного указания пути к конфигу:
+```csharp
+// ModMain.cs::InitializeLogging()
+var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+var nlogConfigPath = System.IO.Path.Combine(modPath, "NLog.config");
+LogManager.Configuration = new XmlLoggingConfiguration(nlogConfigPath);
+```
+
+**NLog.config должен содержать `createDirs="true"`** для автоматического создания папок логов.
 
 ---
 
@@ -234,8 +250,40 @@ GalacticExpansion/
 
 1. Клонировать репозиторий
 2. Восстановить NuGet пакеты: `dotnet restore`
-3. Собрать проект: `dotnet build`
+3. Собрать проект: `dotnet build src/GalacticExpansion.sln --configuration Release`
 4. Запустить тесты: `dotnet test`
+
+### Утилиты разработки
+
+**tools\deploy_mod.cmd** — Развертывание мода в папку игры
+```cmd
+tools\deploy_mod.cmd Release
+```
+- Создает бэкапы перед обновлением
+- Копирует DLL, зависимости и конфиги
+- Сохраняет пользовательский Configuration.json
+- Очищает старые бэкапы (> 10 штук)
+
+**tools\view_logs.cmd** — Просмотр и копирование логов
+```cmd
+tools\view_logs.cmd
+```
+- Автоматически копирует новые логи в `logs\` папку проекта (без перезаписи)
+- Показывает последние 50 строк лога с цветной подсветкой
+- Fallback на логи сервера, если логи мода не найдены
+
+### Структура папок при разработке
+
+```
+e:\for_game\Empyrion\GalacticExpansion\     # Исходники проекта
+├── logs\                                    # Локальные копии логов (в .gitignore)
+│   ├── GLEX_yyyy-MM-dd.log
+│   └── GLEX_errors_yyyy-MM-dd.log
+└── tools\                                   # Утилиты разработки
+    ├── deploy_mod.cmd
+    ├── view_logs.cmd
+    └── 
+```
 
 ### Testing
 
@@ -292,7 +340,50 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ---
 
-## Известные проблемы
+## Известные проблемы и решения
+
+### ✅ РЕШЕНО (31.01.2026): Логи NLog не создаются
+
+**Проблема:** Папка `Logs\` не создавалась, файлы логов не записывались.
+
+**Причина:** NLog не мог автоматически найти `NLog.config`, потому что:
+- `AppDomain.CurrentDomain.BaseDirectory` = `DedicatedServer\`
+- NLog искал конфиг относительно BaseDirectory, а не папки мода
+
+**Решение:**
+```csharp
+// Явно указываем путь к NLog.config
+var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+var nlogConfigPath = System.IO.Path.Combine(modPath, "NLog.config");
+
+if (System.IO.File.Exists(nlogConfigPath))
+{
+    LogManager.Configuration = new XmlLoggingConfiguration(nlogConfigPath);
+}
+```
+
+**NLog.config должен содержать:**
+```xml
+<target name="logfile" xsi:type="File"
+        fileName="..."
+        createDirs="true" />
+```
+
+### ✅ РЕШЕНО (31.01.2026): ArgumentNullException при регистрации логгера
+
+**Проблема:** `System.ArgumentNullException: Value cannot be null. Parameter name: instance`
+
+**Причина:** Логгер объявлен как `ILogger? _logger`, nullable тип передавался в DI-контейнер.
+
+**Решение:**
+```csharp
+// Явная проверка на null
+if (_logger != null)
+    _container.Register<ILogger>(_logger);
+```
+
+### Известные нерешенные проблемы
 
 1. **ModAPI timeout:** Иногда запросы не возвращаются → используем timeout + retry
 2. **Prefab не найден:** Сервер не находит prefab → логируем WARNING, пропускаем спавн
