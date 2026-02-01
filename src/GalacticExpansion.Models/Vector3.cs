@@ -71,6 +71,19 @@ namespace GalacticExpansion.Models
         }
 
         /// <summary>
+        /// Вычисляет квадрат расстояния до другой точки.
+        /// Быстрее чем DistanceTo, так как не вычисляет квадратный корень.
+        /// Используется для сравнения расстояний без необходимости точного значения.
+        /// </summary>
+        public static float DistanceSquared(Vector3 a, Vector3 b)
+        {
+            float dx = a.X - b.X;
+            float dy = a.Y - b.Y;
+            float dz = a.Z - b.Z;
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        /// <summary>
         /// Преобразует вектор в строковое представление формата (X, Y, Z).
         /// </summary>
         /// <returns>Строковое представление вектора</returns>

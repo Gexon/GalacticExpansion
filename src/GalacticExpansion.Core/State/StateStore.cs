@@ -182,9 +182,19 @@ namespace GalacticExpansion.Core.State
 
             try
             {
-                var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+                // Используем миллисекунды для уникальности временной метки
+                var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss-fff");
                 var backupFileName = $"state_backup_{timestamp}.json";
                 var backupFilePath = Path.Combine(_backupPath, backupFileName);
+
+                // Если файл все еще существует (крайне маловероятно), добавляем счетчик
+                int counter = 0;
+                while (File.Exists(backupFilePath) && counter < 100)
+                {
+                    counter++;
+                    backupFileName = $"state_backup_{timestamp}_{counter}.json";
+                    backupFilePath = Path.Combine(_backupPath, backupFileName);
+                }
 
                 Logger.Info($"Creating backup: {backupFileName}");
 

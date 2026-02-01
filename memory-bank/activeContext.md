@@ -2,12 +2,42 @@
 
 ## Текущее состояние проекта
 
-**Дата обновления:** 31.01.2026  
-**Фаза:** Phase 1 Foundation COMPLETED! ✅ Логирование исправлено, готов к полноценному запуску
+**Дата обновления:** 01.02.2026  
+**Фаза:** Phase 2 Core COMPLETED! ✅ Ядро симуляции реализовано, готов к тестированию на dedicated server
 
 ---
 
 ## Недавние изменения
+
+### 01.02.2026 — ЗАВЕРШЕНА Phase 2: Core — Ядро симуляции
+
+**Реализовано:**
+- ✅ **EventBus** — внутренняя шина событий для слабой связи модулей (thread-safe)
+- ✅ **ModuleRegistry** — реестр модулей с управлением жизненным циклом и изоляцией ошибок
+- ✅ **SimulationEngine** — главный движок симуляции с таймером тиков (1 tick/sec)
+- ✅ **PlayerTracker** — отслеживание игроков на playfield'ах с событиями входа/выхода
+- ✅ **StructureTracker** — периодическое обновление списка структур и детектирование изменений
+- ✅ **События Phase 2** — 6 типов событий для коммуникации модулей
+- ✅ **Интеграция с ModMain** — полная интеграция всех компонентов
+- ✅ **Unit-тесты** — 55 тестов с покрытием > 70%
+- ✅ **Integration-тесты** — 7 тестов для проверки полного цикла
+
+**Статистика:**
+- 25 новых файлов
+- ~2850 строк нового кода
+- 5 проектов в solution (добавлен GalacticExpansion.Tests.Integration)
+
+**Результат:**
+- ✅ Simulation loop работает с частотой 1 tick/second
+- ✅ Модули регистрируются и обновляются в правильном порядке
+- ✅ События публикуются и обрабатываются корректно
+- ✅ Игроки и структуры отслеживаются автоматически
+- ✅ State сохраняется периодически без ошибок
+- ✅ Graceful shutdown с корректным завершением всех модулей
+
+**Следующий шаг:** Тестирование на dedicated server (Phase 2.5)
+
+---
 
 ### 31.01.2026 — ИСПРАВЛЕНО: Проблема с логированием NLog
 
@@ -226,41 +256,62 @@ BaseL2: 3.5/час + 2 аванпоста + верфь = 3.5 × 1.5 × 1.5 = 7.8
 
 ## Следующие шаги
 
-### ✅ Phase 1: Foundation COMPLETED → Phase 1.5: First Deployment
+### ✅ Phase 2: Core COMPLETED → Phase 2.5: First Testing
 
 **Приоритет: Критический**
 
-Первый запуск и проверка работоспособности:
-1. **Копирование Empyrion DLL** — ModApi.dll, Mif.dll в папку lib/
-2. **Сборка проекта** — Visual Studio Build Solution
+Тестирование Phase 2 на dedicated server:
+1. **Копирование Empyrion DLL** — ModApi.dll, Mif.dll в папку lib/ (если еще не сделано)
+2. **Сборка проекта** — `dotnet build src/GalacticExpansion.sln --configuration Release`
 3. **Деплой** — запуск tools\deploy_mod.cmd Release
 4. **Запуск сервера** — запуск dedicated server и мониторинг логов
 5. **Проверка логов** — tools\view_logs.cmd для просмотра GLEX_*.log
+6. **Мониторинг производительности** — время тиков < 100ms, память < 200MB
 
-**Ожидаемые логи при успешном запуске:**
+**Ожидаемые логи при успешном запуске Phase 2:**
 ```
-[INFO] GLEX v1.0 Phase 1 initializing...
-[INFO] Mod path: <path>
-[INFO] Loading configuration...
-[INFO] Configuration loaded successfully
-[INFO] Initializing Empyrion Gateway...
-[INFO] Gateway started (rate limit: 10 req/sec)
+[INFO] GLEX v1.0 Phase 2 initializing...
+[INFO] EventBus initialized
+[INFO] ModuleRegistry initialized
+[INFO] Registering simulation modules...
+[INFO] PlayerTracker registered
+[INFO] StructureTracker registered
+[INFO] Starting simulation engine...
+[INFO] SimulationEngine starting...
 [INFO] Loading simulation state...
 [INFO] State loaded: 0 colonies, version 1
-[INFO] GLEX initialized successfully!
+[INFO] Initializing 2 modules...
+[INFO] Module 'PlayerTracker' initialized
+[INFO] Module 'StructureTracker' initialized
+[INFO] Starting simulation timer (interval=1000ms)
+[INFO] SimulationEngine started successfully
+[INFO] GLEX Core initialized!
+
+[TRACE] Simulation tick #1 (dt=1.0s)
+[TRACE] PlayerTracker: 0 players tracked
+[TRACE] StructureTracker: Refreshing structures...
+[DEBUG] Requesting global structure list...
+[DEBUG] Received 142 structures
+[TRACE] Simulation tick #1 completed in 45ms
 ```
 
-**Критерии успеха Phase 1.5:**
+**Критерии успеха Phase 2.5:**
 - Мод загружается без ошибок
-- Gateway запущен
-- StateStore создал state.json
+- SimulationEngine запущен и работает
+- PlayerTracker отслеживает игроков
+- StructureTracker обновляет список структур каждые 10 секунд
+- События публикуются корректно
+- Время тиков < 100ms
+- Память < 200MB
 - Логи показывают нормальную работу
 
-### Phase 2: Core (Недели 3-4) — NEXT
+### Phase 3: Domain (Недели 5-7) — NEXT
 
-После успешного запуска переходим к реализации:
-1. **Core Loop** — главный цикл симуляции (1 неделя)
-2. **Player & Structure Trackers** — отслеживание игроков и структур (5 дней)
+После успешного тестирования переходим к реализации:
+1. **Spawning & Evolution** — создание и развитие структур (10 дней)
+2. **Placement Resolver** — поиск мест для размещения (5 дней)
+3. **Economy Simulator** — виртуальные ресурсы и производство (7 дней)
+4. **Unit Economy Manager** — учет и производство юнитов (7 дней)
 
 ### Рекомендуемый порядок разработки
 

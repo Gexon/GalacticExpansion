@@ -2,7 +2,9 @@ using System;
 using System.Threading.Tasks;
 using Eleon.Modding;
 using GalacticExpansion.Core.Gateway;
+using GalacticExpansion.Core.Simulation;
 using GalacticExpansion.Core.State;
+using GalacticExpansion.Core.Tracking;
 using GalacticExpansion.DependencyInjection;
 using GalacticExpansion.Models;
 using NLog;
@@ -17,7 +19,7 @@ namespace GalacticExpansion
     /// Жизненный цикл:
     /// 1. Init() - инициализация при запуске сервера
     /// 2. Game_Event() - обработка событий от игры
-    /// 3. Game_Update() - вызывается каждый tick (будет использоваться в Phase 2)
+    /// 3. Game_Update() - вызывается каждый tick (используется SimulationEngine)
     /// 4. Shutdown() - остановка при выключении сервера
     /// </summary>
     public class ModMain : ModInterface
@@ -26,11 +28,11 @@ namespace GalacticExpansion
         private ServiceContainer? _container;
         private IEmpyrionGateway? _gateway;
         private IStateStore? _stateStore;
+        private ISimulationEngine? _simulationEngine;
         private SimulationState? _currentState;
         private Configuration? _config;
         private ModGameAPI? _modApi;
         
-        private DateTime _lastSaveTime;
         private DateTime _lastBackupTime;
 
         /// <summary>
@@ -46,7 +48,7 @@ namespace GalacticExpansion
                 _logger = LogManager.GetCurrentClassLogger();
                 
                 _logger.Info("========================================");
-                _logger.Info("GalacticExpansion (GLEX) v1.0 Phase 1");
+                _logger.Info("GalacticExpansion (GLEX) v1.0 Phase 2");
                 _logger.Info("Initializing...");
                 _logger.Info("========================================");
 
@@ -97,16 +99,57 @@ namespace GalacticExpansion
                 _stateStore = new StateStore(modPath);
                 _container.Register<IStateStore>(_stateStore);
 
-                // 7. Загружаем состояние симуляции
-                _logger.Info("Loading simulation state...");
-                _currentState = _stateStore.LoadAsync().Result;
-                _logger.Info($"State loaded: {_currentState.Colonies.Count} colonies, version {_currentState.Version}");
+                // 7. Инициализируем Phase 2: Core Loop компоненты
+                _logger.Info("Initializing Phase 2 components...");
+                
+                // EventBus для внутренней коммуникации модулей
+                var eventBus = new EventBus(_logger);
+                _container.Register<IEventBus>(eventBus);
+                _logger.Info("EventBus initialized");
+                
+                // ModuleRegistry для управления модулями
+                var moduleRegistry = new ModuleRegistry(_logger);
+                _container.Register<IModuleRegistry>(moduleRegistry);
+                _logger.Info("ModuleRegistry initialized");
+                
+                // SimulationEngine - главный движок симуляции
+                _simulationEngine = new SimulationEngine(
+                    _stateStore,
+                    moduleRegistry,
+                    eventBus,
+                    _logger
+                );
+                _container.Register<ISimulationEngine>(_simulationEngine);
+                
+                // 8. Регистрируем модули симуляции
+                _logger.Info("Registering simulation modules...");
+                
+                // PlayerTracker - отслеживание игроков
+                var playerTracker = new PlayerTracker(_gateway, eventBus, _logger);
+                _simulationEngine.RegisterModule(playerTracker);
+                _container.Register<IPlayerTracker>(playerTracker);
+                _logger.Info("PlayerTracker registered");
+                
+                // StructureTracker - отслеживание структур
+                var structureTracker = new StructureTracker(_gateway, eventBus, _logger);
+                _simulationEngine.RegisterModule(structureTracker);
+                _container.Register<IStructureTracker>(structureTracker);
+                _logger.Info("StructureTracker registered");
+                
+                // 9. Запускаем симуляцию
+                _logger.Info("Starting simulation engine...");
+                _ = Task.Run(async () => await _simulationEngine.StartAsync());
+                
+                // Даем время на инициализацию
+                Task.Delay(500).Wait();
+                
+                // Получаем текущее состояние из движка
+                _currentState = _simulationEngine.State;
 
-                // 8. Инициализируем таймеры
-                _lastSaveTime = DateTime.UtcNow;
+                // 10. Инициализируем таймеры
                 _lastBackupTime = DateTime.UtcNow;
 
-                // 9. Логируем успешную инициализацию
+                // 11. Логируем успешную инициализацию
                 _logger.Info("========================================");
                 _logger.Info("GLEX initialized successfully!");
                 _logger.Info($"  Home Playfield: {_config.HomePlayfield}");
@@ -144,26 +187,17 @@ namespace GalacticExpansion
         /// <summary>
         /// Обновление симуляции.
         /// Вызывается каждый тик сервера.
-        /// В Phase 1 используется только для авто-сохранения.
-        /// В Phase 2 здесь будет основной цикл симуляции.
+        /// В Phase 2 SimulationEngine управляет основным циклом через собственный таймер.
+        /// Здесь остается только периодическое создание бэкапов.
         /// </summary>
         public void Game_Update()
         {
             try
             {
-                if (_config == null || _stateStore == null || _currentState == null)
+                if (_config == null || _stateStore == null)
                     return;
 
                 var now = DateTime.UtcNow;
-
-                // Авто-сохранение состояния
-                if (_currentState.IsDirty && 
-                    (now - _lastSaveTime).TotalMinutes >= _config.Simulation.SaveIntervalMinutes)
-                {
-                    _logger?.Debug("Auto-saving state...");
-                    _stateStore.SaveAsync(_currentState).Wait();
-                    _lastSaveTime = now;
-                }
 
                 // Создание периодических бэкапов
                 if ((now - _lastBackupTime).TotalHours >= _config.Simulation.StateBackupIntervalHours)
@@ -192,7 +226,15 @@ namespace GalacticExpansion
                 _logger?.Info("GLEX shutting down...");
                 _logger?.Info("========================================");
 
-                // 1. Останавливаем Gateway
+                // 1. Останавливаем SimulationEngine (сохранит state и завершит модули)
+                if (_simulationEngine != null && _simulationEngine.IsRunning)
+                {
+                    _logger?.Info("Stopping SimulationEngine...");
+                    _simulationEngine.StopAsync().Wait();
+                    _logger?.Info("SimulationEngine stopped");
+                }
+
+                // 2. Останавливаем Gateway
                 if (_gateway != null && _gateway.IsRunning)
                 {
                     _logger?.Info("Stopping Gateway...");
@@ -200,14 +242,9 @@ namespace GalacticExpansion
                     _logger?.Info("Gateway stopped");
                 }
 
-                // 2. Сохраняем финальное состояние
-                if (_stateStore != null && _currentState != null)
+                // 3. Создаем финальный бэкап
+                if (_stateStore != null)
                 {
-                    _logger?.Info("Saving final state...");
-                    _stateStore.SaveAsync(_currentState).Wait();
-                    _logger?.Info("State saved");
-
-                    // 3. Создаем финальный бэкап
                     _logger?.Info("Creating final backup...");
                     _stateStore.CreateBackupAsync().Wait();
                     _logger?.Info("Backup created");
