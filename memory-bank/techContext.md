@@ -18,6 +18,7 @@
 **Обязательные (от Empyrion):**
 - `ModApi.dll` — интерфейсы ModAPI
 - `Mif.dll` — ModInterface Framework
+- `protobuf-net.dll` — сериализация данных (зависимость ModApi.dll)
 
 ---
 
@@ -381,6 +382,41 @@ if (System.IO.File.Exists(nlogConfigPath))
 // Явная проверка на null
 if (_logger != null)
     _container.Register<ILogger>(_logger);
+```
+
+### ✅ РЕШЕНО (01.02.2026): StateStore.CreateBackupAsync - коллизия временных меток
+
+**Проблема:** При быстром создании нескольких бэкапов (< 1 сек) файлы получали одинаковые имена, что приводило к перезаписи.
+
+**Причина:** Временная метка имела точность только до секунды (`yyyy-MM-dd_HH-mm-ss`).
+
+**Решение:**
+```csharp
+// Увеличена точность до миллисекунд + счетчик для гарантии
+var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss-fff");
+int counter = 0;
+while (File.Exists(backupFilePath) && counter < 100) {
+    counter++;
+    backupFileName = $"state_backup_{timestamp}_{counter}.json";
+    backupFilePath = Path.Combine(_backupPath, backupFileName);
+}
+```
+
+**Альтернативные решения:**
+1. Использовать Ticks: `state_backup_{timestamp}_{ticks}.json`
+2. Использовать короткий GUID: `state_backup_{timestamp}_{guid8}.json`
+
+### ✅ РЕШЕНО (01.02.2026): Конфликт имен PlayerInfo
+
+**Проблема:** `CS0104: "PlayerInfo" является неоднозначной ссылкой между "Eleon.Modding.PlayerInfo" и "GalacticExpansion.Models.PlayerInfo"`
+
+**Причина:** ModAPI содержит свой класс `PlayerInfo`, что создавало конфликт имен.
+
+**Решение:**
+```csharp
+// Переименован класс и файл
+PlayerInfo.cs → TrackedPlayerInfo.cs
+public class TrackedPlayerInfo { ... }
 ```
 
 ### Известные нерешенные проблемы
