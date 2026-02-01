@@ -24,52 +24,16 @@ echo =========================================================================
 echo.
 
 REM ---------------------------------------------------------------------------
-REM Часть 1: Копирование логов в папку проекта
-REM ---------------------------------------------------------------------------
-echo [0] Копирование логов в папку проекта...
-echo     Папка назначения: %PROJECT_LOGS_DIR%
-echo.
-
-REM Создаем папку logs в проекте, если не существует
-if not exist "%PROJECT_LOGS_DIR%" (
-    mkdir "%PROJECT_LOGS_DIR%"
-    echo     [OK] Папка создана
-)
-
-REM Копируем только новые файлы логов (без перезаписи)
-if exist "%MOD_LOGS_DIR%\*.log" (
-    set "COPIED_COUNT=0"
-    for %%F in ("%MOD_LOGS_DIR%\*.log") do (
-        if not exist "%PROJECT_LOGS_DIR%\%%~nxF" (
-            copy /Y "%%F" "%PROJECT_LOGS_DIR%\" >nul 2>&1
-            if !ERRORLEVEL! EQU 0 (
-                set /a COPIED_COUNT+=1
-                echo     [+] Скопирован: %%~nxF
-            )
-        )
-    )
-    
-    if !COPIED_COUNT! EQU 0 (
-        echo     [OK] Новых логов нет, все файлы уже скопированы
-    ) else (
-        echo     [OK] Скопировано новых файлов: !COPIED_COUNT!
-    )
-) else (
-    echo     [!] Логи мода не найдены для копирования
-)
-echo.
-
-REM ---------------------------------------------------------------------------
-REM Часть 2: Логи мода (основной источник)
+REM Часть 1: Логи мода (основной источник)
 REM ---------------------------------------------------------------------------
 echo [1] Проверка логов мода...
 echo     Папка: %MOD_LOGS_DIR%
 echo.
 
 if exist "%MOD_LOGS_DIR%" (
-    REM Ищем последний лог-файл мода
+    REM Ищем последний лог-файл мода (с новым форматом: GLEX_2026-02-02_143025.log)
     set "MOD_LOG="
-    for /f "delims=" %%F in ('dir /b /o:-d "%MOD_LOGS_DIR%\GLEX_*.log" 2^>nul') do (
+    for /f "delims=" %%F in ('dir /b /o:-d "%MOD_LOGS_DIR%\GLEX_*.log" 2^>nul ^| findstr /v "errors"') do (
         set "MOD_LOG=%%F"
         goto :mod_found
     )
@@ -100,7 +64,7 @@ if exist "%MOD_LOGS_DIR%" (
 )
 
 REM ---------------------------------------------------------------------------
-REM Часть 3: Логи из Empyrion Dedicated Server (fallback)
+REM Часть 2: Логи из Empyrion Dedicated Server (fallback)
 REM ---------------------------------------------------------------------------
 :check_server_logs
 echo [2] Проверка логов Empyrion Dedicated Server...
@@ -111,8 +75,8 @@ if not exist "%SERVER_LOGS_DIR%" (
     echo [ОШИБКА] Папка логов сервера не найдена: %SERVER_LOGS_DIR%
     echo.
     echo Проверьте путь к Empyrion в скрипте
-    pause
-    exit /b 1
+    echo.
+    goto :end
 )
 
 REM Ищем последний Dedicated лог-файл
@@ -124,8 +88,8 @@ if not defined TEMP_LOG (
     echo [ОШИБКА] Лог-файлы Dedicated Server не найдены
     echo.
     echo Возможно, сервер еще не запускался
-    pause
-    exit /b 1
+    echo.
+    goto :end
 )
 
 REM Находим самый свежий файл
@@ -140,8 +104,8 @@ for /f "delims=" %%F in ('dir /b /o:-d "%SERVER_LOGS_DIR%\*\Dedicated*.log" 2^>n
 :server_found
 if not defined SERVER_LOG (
     echo [ОШИБКА] Не удалось найти логи Dedicated Server
-    pause
-    exit /b 1
+    echo.
+    goto :end
 )
 
 echo [OK] Найден лог сервера: 
@@ -160,17 +124,67 @@ echo.
 echo -------------------------------------------------------------------------
 echo.
 
-REM Спросить, открыть ли полный лог сервера
-echo Открыть полный лог сервера в Notepad? (Y/N)
-set /p "OPEN_SERVER="
-
-if /i "%OPEN_SERVER%"=="Y" (
-    start notepad "%SERVER_LOG%"
-)
-
 :end
 echo.
-echo =========================================================================
+
+REM ---------------------------------------------------------------------------
+REM Часть 3: Копирование логов в папку проекта
+REM ---------------------------------------------------------------------------
+echo [3] Копирование логов в папку проекта...
+echo     Источник: %MOD_LOGS_DIR%
+echo     Назначение: %PROJECT_LOGS_DIR%
 echo.
-pause
+
+REM Создаем папку logs в проекте, если не существует
+if not exist "%PROJECT_LOGS_DIR%" (
+    mkdir "%PROJECT_LOGS_DIR%"
+    echo     [OK] Папка создана
+)
+
+REM Копируем файлы логов с перезаписью устаревших
+if exist "%MOD_LOGS_DIR%\*.log" (
+    set "COPIED_COUNT=0"
+    set "UPDATED_COUNT=0"
+    for %%F in ("%MOD_LOGS_DIR%\*.log") do (
+        set "NEED_COPY=0"
+        
+        REM Проверяем, существует ли файл в проекте
+        if not exist "%PROJECT_LOGS_DIR%\%%~nxF" (
+            set "NEED_COPY=1"
+        ) else (
+            REM Сравниваем даты модификации через PowerShell
+            for /f "usebackq" %%T in (`powershell -NoProfile -Command "if ((Get-Item '%%F').LastWriteTime -gt (Get-Item '%PROJECT_LOGS_DIR%\%%~nxF').LastWriteTime) { 'NEWER' } else { 'OLDER' }"`) do (
+                if "%%T"=="NEWER" (
+                    set "NEED_COPY=2"
+                )
+            )
+        )
+        
+        REM Копируем, если нужно
+        if !NEED_COPY! GTR 0 (
+            copy /Y "%%F" "%PROJECT_LOGS_DIR%\" >nul 2>&1
+            if !ERRORLEVEL! EQU 0 (
+                if !NEED_COPY! EQU 1 (
+                    set /a COPIED_COUNT+=1
+                    echo     [+] Новый файл: %%~nxF
+                ) else (
+                    set /a UPDATED_COUNT+=1
+                    echo     [*] Обновлён: %%~nxF
+                )
+            )
+        )
+    )
+    
+    if !COPIED_COUNT! EQU 0 if !UPDATED_COUNT! EQU 0 (
+        echo     [OK] Все логи актуальны, обновление не требуется
+    ) else (
+        if !COPIED_COUNT! GTR 0 echo     [OK] Скопировано новых файлов: !COPIED_COUNT!
+        if !UPDATED_COUNT! GTR 0 echo     [OK] Обновлено файлов: !UPDATED_COUNT!
+    )
+) else (
+    echo     [!] Логи мода не найдены для копирования
+)
+
+echo.
+echo =========================================================================
 exit /b 0

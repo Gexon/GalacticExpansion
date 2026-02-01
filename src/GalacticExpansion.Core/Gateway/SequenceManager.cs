@@ -119,7 +119,17 @@ namespace GalacticExpansion.Core.Gateway
                 }
             }
 
-            Logger.Warn($"Received response for unknown SeqNr {seqNr} (type: {typeof(T).Name}). Probably timed out or cancelled.");
+            // SeqNr = 0 используется Empyrion для серверных событий (Event_Player_Connected, Event_Playfield_Loaded и т.д.)
+            // Это нормальное поведение, не нужно выводить предупреждение
+            if (seqNr != 0)
+            {
+                Logger.Warn($"Received response for unknown SeqNr {seqNr} (type: {typeof(T).Name}). Probably timed out or cancelled.");
+            }
+            else
+            {
+                Logger.Trace($"Received server event with SeqNr 0 (type: {typeof(T).Name}) - this is expected for unsolicited events");
+            }
+            
             return false;
         }
 

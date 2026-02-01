@@ -34,6 +34,7 @@ namespace GalacticExpansion
         private ModGameAPI? _modApi;
         
         private DateTime _lastBackupTime;
+        private bool _isInitialized = false; // Флаг инициализации
 
         /// <summary>
         /// Инициализация мода.
@@ -43,6 +44,14 @@ namespace GalacticExpansion
         {
             try
             {
+                // Защита от повторной инициализации
+                if (_isInitialized)
+                {
+                    var logger = _logger ?? LogManager.GetCurrentClassLogger();
+                    logger.Warn("Game_Start called again, but mod is already initialized. Skipping.");
+                    return;
+                }
+                
                 // 1. Инициализация логирования
                 InitializeLogging();
                 _logger = LogManager.GetCurrentClassLogger();
@@ -77,10 +86,8 @@ namespace GalacticExpansion
                 _logger.Info("Setting up dependency injection...");
                 _container = new ServiceContainer();
                 
-                // Регистрируем логгер (явно проверяем на null для компилятора)
-                if (_logger != null)
-                    _container.Register<ILogger>(_logger);
-                
+                // Регистрируем логгер
+                _container.Register<ILogger>(_logger!);
                 _container.Register<ModGameAPI>(_modApi);
                 _container.Register<Configuration>(_config);
 
@@ -157,6 +164,9 @@ namespace GalacticExpansion
                 _logger.Info($"  Tick Interval: {_config.Simulation.TickIntervalMs}ms");
                 _logger.Info($"  Auto-save: every {_config.Simulation.SaveIntervalMinutes} minute(s)");
                 _logger.Info("========================================");
+                
+                // Устанавливаем флаг успешной инициализации
+                _isInitialized = true;
             }
             catch (Exception ex)
             {
@@ -253,6 +263,9 @@ namespace GalacticExpansion
                 _logger?.Info("========================================");
                 _logger?.Info("GLEX shutdown complete");
                 _logger?.Info("========================================");
+
+                // Сбрасываем флаг инициализации
+                _isInitialized = false;
 
                 // Flush логов
                 LogManager.Flush();

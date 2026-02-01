@@ -114,12 +114,19 @@ REM ---------------------------------------------------------------------------
 echo.
 echo [4/8] Копирование файлов мода...
 
+REM Счётчики для итоговой сводки
+set "COPIED_COUNT=0"
+set "FAILED_COUNT=0"
+
 REM Копирование основной DLL
 echo Копирование: GalacticExpansion.dll
 copy /Y "%BUILD_DIR%\GalacticExpansion.dll" "%MOD_TARGET%\" >nul
 if errorlevel 1 (
     echo [ОШИБКА] Не удалось скопировать GalacticExpansion.dll
+    set /a FAILED_COUNT+=1
     exit /b 1
+) else (
+    set /a COPIED_COUNT+=1
 )
 
 REM Копирование PDB (отладочная информация) для Debug-сборки
@@ -127,6 +134,7 @@ if "%BUILD_CONFIG%"=="Debug" (
     if exist "%BUILD_DIR%\GalacticExpansion.pdb" (
         echo Копирование: GalacticExpansion.pdb (отладочные символы)
         copy /Y "%BUILD_DIR%\GalacticExpansion.pdb" "%MOD_TARGET%\" >nul
+        if not errorlevel 1 set /a COPIED_COUNT+=1
     )
 )
 
@@ -135,22 +143,27 @@ echo Копирование зависимостей...
 if exist "%BUILD_DIR%\GalacticExpansion.Core.dll" (
     echo   - GalacticExpansion.Core.dll
     copy /Y "%BUILD_DIR%\GalacticExpansion.Core.dll" "%MOD_TARGET%\" >nul
+    if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\GalacticExpansion.Models.dll" (
     echo   - GalacticExpansion.Models.dll
     copy /Y "%BUILD_DIR%\GalacticExpansion.Models.dll" "%MOD_TARGET%\" >nul
+    if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\NLog.dll" (
     echo   - NLog.dll
     copy /Y "%BUILD_DIR%\NLog.dll" "%MOD_TARGET%\" >nul
+    if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\Newtonsoft.Json.dll" (
     echo   - Newtonsoft.Json.dll
     copy /Y "%BUILD_DIR%\Newtonsoft.Json.dll" "%MOD_TARGET%\" >nul
+    if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\NLog.config" (
     echo   - NLog.config
     copy /Y "%BUILD_DIR%\NLog.config" "%MOD_TARGET%\" >nul
+    if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 
 echo [OK] Файлы мода скопированы
@@ -254,21 +267,15 @@ echo =========================================================================
 echo Обновление завершено успешно!
 echo =========================================================================
 echo.
-echo Конфигурация сборки: %BUILD_CONFIG%
-echo Целевая папка: %MOD_TARGET%
-echo Время: %date% %time%
+echo Итоговая сводка:
+echo   - Конфигурация: %BUILD_CONFIG%
+echo   - Скопировано файлов: %COPIED_COUNT%
+if %FAILED_COUNT% GTR 0 (
+    echo   - Ошибок при копировании: %FAILED_COUNT%
+)
+echo   - Целевая папка: %MOD_TARGET%
 echo.
-echo ВАЖНО: Следующие шаги (согласно Operations Runbook 5.1):
-echo   1. Остановите Empyrion Dedicated Server (если запущен)
-echo   2. Проверьте CHANGELOG новой версии на предмет миграций
-echo   3. Запустите сервер
-echo   4. Проверьте логи на наличие ошибок:
-echo      - [INFO] GalacticExpansion vX.X loading...
-echo      - Проверьте на наличие ошибок инициализации
-echo.
-echo Бэкапы сохранены в: %MOD_TARGET%\backups\
-echo В случае проблем, используйте откат (Operations Runbook 5.2)
-echo.
+echo Мод готов к запуску!
 echo =========================================================================
 
 endlocal
