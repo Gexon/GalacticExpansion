@@ -9,9 +9,18 @@ namespace GalacticExpansion.Core.Placement
     /// Интерфейс для поиска подходящих мест размещения структур на планетах.
     /// Реализует спиральный алгоритм поиска с проверкой дистанций от игроков и структур,
     /// а также точное определение высоты рельефа через IPlayfield.GetTerrainHeightAt() (API v1.15+).
+    /// IModApi передаётся позже через SetModApi (IMod.Init вызывается после Game_Start).
     /// </summary>
     public interface IPlacementResolver
     {
+        /// <summary>
+        /// Устанавливает расширенный API (IModApi) после вызова IMod.Init.
+        /// Позволяет подписаться на OnPlayfieldLoaded и использовать IPlayfield.GetTerrainHeightAt().
+        /// Вызывается из ModMain.Init; до вызова используется fallback-высота рельефа.
+        /// </summary>
+        /// <param name="modApi">IModApi от игры или null для отключения точной высоты.</param>
+        void SetModApi(IModApi? modApi);
+
         /// <summary>
         /// Находит подходящее место для размещения структуры согласно критериям.
         /// Использует спиральный алгоритм поиска от центра с адаптивным шагом.

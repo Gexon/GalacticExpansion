@@ -26,16 +26,19 @@ namespace GalacticExpansion.Core.Placement
         private readonly IPlayerTracker _playerTracker;
         private readonly ILogger _logger;
         private readonly Dictionary<string, IPlayfieldWrapper> _playfieldCache;
+        private bool _modApiSubscribed; // Защита от повторной подписки в SetModApi
         private const float DefaultStepSize = 50f;
         private const float DefaultTerrainHeight = 100f; // Высота по умолчанию для fallback
 
         /// <summary>
-        /// Конструктор PlacementResolver
+        /// Конструктор PlacementResolver.
+        /// IModApi в Game_Start ещё недоступен (передаётся в IMod.Init позже). Передайте null;
+        /// после Init вызовите SetModApi(modAPI), чтобы включить точную высоту рельефа.
         /// </summary>
         /// <param name="gateway">Шлюз для взаимодействия с Empyrion API</param>
         /// <param name="playerTracker">Трекер игроков для проверки дистанций</param>
         /// <param name="logger">Логгер</param>
-        /// <param name="modApi">Опциональный IModApi (расширенный API) для доступа к IPlayfield через события</param>
+        /// <param name="modApi">Опциональный IModApi; обычно null в Game_Start, передаётся позже через SetModApi в Init</param>
         public PlacementResolver(
             IEmpyrionGateway gateway,
             IPlayerTracker playerTracker,
@@ -46,35 +49,75 @@ namespace GalacticExpansion.Core.Placement
             _playerTracker = playerTracker ?? throw new ArgumentNullException(nameof(playerTracker));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _playfieldCache = new Dictionary<string, IPlayfieldWrapper>();
+            _modApiSubscribed = false;
 
-            // Если доступен IModApi (расширенный API через IMod.Init), подписываемся на события playfield'ов
+            // Если IModApi передан в конструкторе (редко), подписываемся сразу
             if (modApi != null && modApi.Application != null)
             {
-                _logger.Info("IModApi available - enabling terrain height detection via IPlayfield");
-                
-                modApi.Application.OnPlayfieldLoaded += (playfield) =>
-                {
-                    if (playfield != null)
-                    {
-                        _playfieldCache[playfield.Name] = new PlayfieldWrapper(playfield);
-                        _logger.Debug($"Cached playfield: {playfield.Name}");
-                    }
-                };
-
-                modApi.Application.OnPlayfieldUnloading += (playfield) =>
-                {
-                    if (playfield != null && _playfieldCache.ContainsKey(playfield.Name))
-                    {
-                        _playfieldCache.Remove(playfield.Name);
-                        _logger.Debug($"Removed playfield from cache: {playfield.Name}");
-                    }
-                };
+                SubscribeToModApi(modApi);
             }
             else
             {
-                _logger.Warn("IModApi not available (base ModGameAPI only) - terrain height detection unavailable, using fallback");
-                _logger.Warn("For precise terrain height, ensure IMod.Init is called with IModApi");
+                _logger.Debug("IModApi not yet set (will be set in IMod.Init if available); using fallback terrain height until then");
             }
+        }
+
+        /// <inheritdoc/>
+        public void SetModApi(IModApi? modApi)
+        {
+            if (modApi == null || modApi.Application == null)
+            {
+                _logger.Debug("SetModApi(null): terrain height remains fallback");
+                return;
+            }
+            if (_modApiSubscribed)
+            {
+                _logger.Debug("SetModApi: already subscribed to IModApi, skipping");
+                return;
+            }
+            SubscribeToModApi(modApi);
+        }
+
+        /// <summary>
+        /// Подписывается на OnPlayfieldLoaded/OnPlayfieldUnloading для кэширования IPlayfield и точной высоты рельефа.
+        /// </summary>
+        private void SubscribeToModApi(IModApi modApi)
+        {
+            if (modApi?.Application == null)
+                return;
+
+            lock (_playfieldCache)
+            {
+                if (_modApiSubscribed)
+                    return;
+                _modApiSubscribed = true;
+            }
+
+            _logger.Info("IModApi available - enabling terrain height detection via IPlayfield");
+
+            modApi.Application.OnPlayfieldLoaded += (playfield) =>
+            {
+                if (playfield != null)
+                {
+                    lock (_playfieldCache)
+                    {
+                        _playfieldCache[playfield.Name] = new PlayfieldWrapper(playfield);
+                    }
+                    _logger.Debug($"Cached playfield: {playfield.Name}");
+                }
+            };
+
+            modApi.Application.OnPlayfieldUnloading += (playfield) =>
+            {
+                if (playfield != null)
+                {
+                    lock (_playfieldCache)
+                    {
+                        _playfieldCache.Remove(playfield.Name);
+                    }
+                    _logger.Debug($"Removed playfield from cache: {playfield.Name}");
+                }
+            };
         }
 
         /// <summary>
@@ -98,9 +141,11 @@ namespace GalacticExpansion.Core.Placement
 
             try
             {
-                var allStructures = await _gateway.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
+                // Игра возвращает GlobalStructureList (поле globalStructures — Dictionary<string, List<GlobalStructureInfo>>)
+                var structureList = await _gateway.SendRequestAsync<GlobalStructureList>(
                     CmdId.Request_GlobalStructure_List, null, timeoutMs: 5000);
 
+                var allStructures = structureList?.globalStructures;
                 var structures = allStructures != null && allStructures.ContainsKey(criteria.Playfield)
                     ? allStructures[criteria.Playfield] : new List<GlobalStructureInfo>();
 
@@ -178,9 +223,10 @@ namespace GalacticExpansion.Core.Placement
 
             try
             {
-                var allStructures = await _gateway.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
+                var structureList = await _gateway.SendRequestAsync<GlobalStructureList>(
                     CmdId.Request_GlobalStructure_List, null, timeoutMs: 5000);
 
+                var allStructures = structureList?.globalStructures;
                 var structures = allStructures != null && allStructures.ContainsKey(criteria.Playfield)
                     ? allStructures[criteria.Playfield] : new List<GlobalStructureInfo>();
 
@@ -272,8 +318,13 @@ namespace GalacticExpansion.Core.Placement
 
             float terrainHeight = DefaultTerrainHeight;
 
-            // Пытаемся получить точную высоту если playfield закэширован (требует IModApi)
-            if (_playfieldCache.TryGetValue(playfieldName, out var playfield))
+            // Пытаемся получить точную высоту если playfield закэширован (требует IModApi, поданного через SetModApi в Init)
+            IPlayfieldWrapper? playfield = null;
+            lock (_playfieldCache)
+            {
+                _playfieldCache.TryGetValue(playfieldName, out playfield);
+            }
+            if (playfield != null)
             {
                 try
                 {

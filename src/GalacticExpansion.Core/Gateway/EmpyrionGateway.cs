@@ -145,11 +145,23 @@ namespace GalacticExpansion.Core.Gateway
             {
                 Logger.Debug($"Received event: {eventId} (SeqNr: {seqNr})");
 
-                // Пытаемся завершить ожидающий запрос с этим SeqNr
-                // Используем динамический тип, так как мы не знаем точный тип ответа
-                var completed = TryCompleteResponse(seqNr, data);
+                // Event_Error — игра вернула ошибку вместо ожидаемого ответа (например, спавн не удался)
+                if (eventId == CmdId.Event_Error)
+                {
+                    var errorMessage = GetErrorMessageFromErrorInfo(data);
+                    Logger.Warn($"Game returned error for SeqNr {seqNr}: {errorMessage}");
+                    var completed = _sequenceManager.CompleteWithError(seqNr, new InvalidOperationException($"Game error (SeqNr {seqNr}): {errorMessage}"));
+                    if (completed)
+                    {
+                        GameEventReceived?.Invoke(this, new GameEventArgs(eventId, seqNr, data));
+                        return;
+                    }
+                }
 
-                if (!completed)
+                // Пытаемся завершить ожидающий запрос с этим SeqNr
+                var completedResponse = TryCompleteResponse(seqNr, data);
+
+                if (!completedResponse)
                 {
                     // Это не ответ на запрос, а самостоятельное событие
                     Logger.Debug($"Event {eventId} is not a response, broadcasting to subscribers");
@@ -162,6 +174,33 @@ namespace GalacticExpansion.Core.Gateway
             {
                 Logger.Error(ex, $"Error handling event: {eventId} (SeqNr: {seqNr})");
             }
+        }
+
+        /// <summary>
+        /// Извлекает текст ошибки из объекта ErrorInfo (игра возвращает при Event_Error).
+        /// </summary>
+        private static string GetErrorMessageFromErrorInfo(object data)
+        {
+            if (data == null) return "Unknown error (null)";
+            // Официальный контракт Event_Error: data — ErrorInfo с полем errorType (enum).
+            // Даёт в логах и исключениях понятный код ошибки (например, EntityNotLocalToPlayfield).
+            if (data is ErrorInfo eInfo)
+                return eInfo.errorType.ToString();
+            var type = data.GetType();
+            var msgProp = type.GetProperty("msg") ?? type.GetProperty("Msg") ?? type.GetProperty("message") ?? type.GetProperty("Message");
+            if (msgProp != null && msgProp.CanRead)
+            {
+                var value = msgProp.GetValue(data);
+                if (value != null && !string.IsNullOrWhiteSpace(value.ToString()))
+                    return value.ToString()!;
+            }
+            var idProp = type.GetProperty("id") ?? type.GetProperty("Id");
+            if (idProp != null && idProp.CanRead)
+            {
+                var id = idProp.GetValue(data);
+                if (id != null) return $"Error id: {id}";
+            }
+            return data.ToString() ?? "Unknown error";
         }
 
         /// <summary>

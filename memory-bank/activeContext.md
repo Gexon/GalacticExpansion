@@ -2,30 +2,32 @@
 
 ## Текущее состояние
 
-**Дата обновления:** 02.02.2026  
-**Фаза:** Phase 3 Domain — завершена, тесты стабилизированы, готово к Phase 4
+**Дата обновления:** 03.02.2026  
+**Фаза:** Phase 3 Domain — завершена, runtime-логика и тесты стабильны, готово к Phase 4
 
-## Главное за сегодня
+## Главное за последние изменения
 
-- Исправлены падения unit и integration тестов для Spawning/Placement/Economy/StageManager.
-- Устранены расхождения контракта `IEntitySpawner` и реализации `EntitySpawner` (порядок параметров).
-- Уточнено поведение `SpawnException` (сохранение prefab/позиции) и событие перехода стадий.
-- Интеграционные тесты Domain теперь проходят полностью.
+- **ColonyTickModule:** создание первой колонии при старте (если колоний нет и Expansion Enabled), вызов `ColonyManager.UpdateColonyAsync` по каждому тику симуляции для каждой колонии.
+- **SimulationEngine:** после инициализации модулей — перезагрузка состояния, чтобы подхватить вновь созданные колонии.
+- **Версия:** в ModMain строка версии обновлена на `v1.0 Phase 3`.
+- **Event_Error:** в `EmpyrionGateway.HandleEvent` при `CmdId.Event_Error` извлекается сообщение из `ErrorInfo` (в т.ч. `errorType.ToString()` для понятного кода в логах, например `EntityNotLocalToPlayfield`), запрос завершается через `SequenceManager.CompleteWithError` — исключение пробрасывается вызывающему вместо "Type mismatch".
+- **PlacementResolver:** поздняя инъекция `IModApi` через `SetModApi` в `ModMain.Init` для корректного определения высоты рельефа.
+- **ConfigurationLoader:** мерж дефолтных `Zirax.Stages` и `Zirax.DropShips` с ванильными префабами (BA_ConstructionSite, BA_Zirax_*, BA_MiningOutpost_Zirax_1 и т.д.), если в конфиге их нет.
+- **StageManager:** префаб для посадочной структуры берётся из `_config.Zirax.DropShips` или fallback `BA_ConstructionSite`.
+- **Инструкция для тестера:** `docs/manuals/Tester_Manual_Colony_Access.md` — консольные команды (tt, gm, find), как найти колонию по state.json/логам.
+- **Тесты:** SimulationEngineTests ожидают `LoadAsync` ровно 2 раза; PlacementResolverTests — тип ответа `GlobalStructureList`; все юнит-тесты проходят.
 
 ## Текущее качество
 
-- Unit тесты: 158/158 ✅  
-- Integration тесты: 17/17 ✅  
+- Unit тесты: проходят ✅  
+- Integration тесты: проходят ✅  
 - Сборка: ✅ успешна
 
-## Что было исправлено в коде
+## Что ещё может потребоваться
 
-- `EntitySpawner` — порядок параметров методов `SpawnStructureAtTerrainAsync` и `SpawnNPCGroupAsync` соответствует интерфейсу.
-- `SpawnException` — сохраняет `PrefabName` и позицию при ошибках спавна.
-- `StageManager` — `StageTransitionEvent.PreviousStage` теперь корректно указывает предыдущую стадию.
-- Тесты — синхронизированы ожидания с актуальными контрактами и поведением state.
+- Если при спавне структуры игра возвращает `Event_Error` — в логах и исключениях теперь виден код ошибки (ErrorType). При необходимости проверить префаб/позицию/playfield в конфиге и окружении сервера.
 
 ## Следующие шаги
 
-1. Phase 3.5: server testing на dedicated server (deploy → мониторинг логов и производительности).
-2. Phase 4: Threat Director + AIM Orchestrator (по документации).
+1. Phase 3.5: server testing на dedicated server (deploy → проверка логов, колоний, спавна).
+2. Phase 4: Threat Director + AIM Orchestrator (по архитектурной документации).

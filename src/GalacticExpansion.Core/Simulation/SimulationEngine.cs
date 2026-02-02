@@ -122,6 +122,10 @@ namespace GalacticExpansion.Core.Simulation
                 _logger.Info("Initializing modules...");
                 await _moduleRegistry.InitializeAllModulesAsync(_state);
 
+                // Перезагрузка state после инициализации (модули могли создать первую колонию)
+                _state = await _stateStore.LoadAsync();
+                _logger.Info($"State after init: {_state.Colonies.Count} colonies");
+
                 // 3. Запуск таймера тиков
                 _logger.Info($"Starting simulation timer (interval={TickIntervalMs}ms)");
                 _simulationTimer = new Timer(
@@ -235,7 +239,10 @@ namespace GalacticExpansion.Core.Simulation
                     TickNumber = _tickNumber
                 };
 
-                _logger.Trace($"Simulation tick #{_tickNumber} (dt={deltaTime:F2}s)");
+                // Логируем тик: DEBUG каждый тик, INFO каждые 60 тиков (~1 раз в минуту при 1 тик/с)
+                _logger.Debug($"SimulationTickEvent: tick #{_tickNumber} (dt={deltaTime:F2}s)");
+                if (_tickNumber % 60 == 0)
+                    _logger.Info($"Simulation tick #{_tickNumber} (interval 60)");
 
                 // Обновляем все модули
                 _moduleRegistry.UpdateAllModules(context);
@@ -249,7 +256,7 @@ namespace GalacticExpansion.Core.Simulation
                     TickTime = currentTime
                 });
 
-                _logger.Trace($"Simulation tick #{_tickNumber} completed in {sw.ElapsedMilliseconds}ms");
+                _logger.Debug($"Simulation tick #{_tickNumber} completed in {sw.ElapsedMilliseconds}ms");
 
                 // Периодическое автосохранение
                 if ((currentTime - _lastSaveTime).TotalSeconds >= AutoSaveIntervalSeconds)

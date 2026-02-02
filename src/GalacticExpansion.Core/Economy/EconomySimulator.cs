@@ -36,7 +36,7 @@ namespace GalacticExpansion.Core.Economy
             if (colony == null)
                 throw new ArgumentNullException(nameof(colony));
 
-            _logger.Trace($"Colony {colony.Id}: Production for deltaTime={deltaTime}s");
+            _logger.Debug($"EconomySimulator: colony {colony.Id} production dt={deltaTime:F2}s, rate={colony.Resources.ProductionRate}, resources before={colony.Resources.VirtualResources:F0}");
 
             float productionRate = colony.Resources.ProductionRate;
             float bonus = colony.Resources.ProductionBonus;

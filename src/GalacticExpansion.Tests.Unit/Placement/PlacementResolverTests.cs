@@ -34,15 +34,18 @@ namespace GalacticExpansion.Tests.Unit.Placement
             _playerTrackerMock = new Mock<IPlayerTracker>();
             _loggerMock = new Mock<ILogger>();
 
-            // По умолчанию нет структур
+            // По умолчанию нет структур (игра возвращает GlobalStructureList)
             _gatewayMock
-                .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
+                .Setup(g => g.SendRequestAsync<GlobalStructureList>(
                     CmdId.Request_GlobalStructure_List,
                     null,
                     It.IsAny<int>()))
-                .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
+                .ReturnsAsync(new GlobalStructureList
                 {
-                    ["Akua"] = new List<GlobalStructureInfo>()
+                    globalStructures = new Dictionary<string, List<GlobalStructureInfo>>
+                    {
+                        ["Akua"] = new List<GlobalStructureInfo>()
+                    }
                 });
 
             // По умолчанию нет игроков
@@ -144,19 +147,22 @@ namespace GalacticExpansion.Tests.Unit.Placement
             // Arrange
             var structurePosition = new PVector3(200, 100, 200);
             _gatewayMock
-                .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
+                .Setup(g => g.SendRequestAsync<GlobalStructureList>(
                     CmdId.Request_GlobalStructure_List,
                     null,
                     It.IsAny<int>()))
-                .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
+                .ReturnsAsync(new GlobalStructureList
                 {
-                    ["Akua"] = new List<GlobalStructureInfo>
+                    globalStructures = new Dictionary<string, List<GlobalStructureInfo>>
                     {
-                        new GlobalStructureInfo
+                        ["Akua"] = new List<GlobalStructureInfo>
                         {
-                            id = 100,
-                            factionId = 1, // Не Zirax (2)
-                            pos = structurePosition
+                            new GlobalStructureInfo
+                            {
+                                id = 100,
+                                factionId = 1, // Не Zirax (2)
+                                pos = structurePosition
+                            }
                         }
                     }
                 });
@@ -186,19 +192,22 @@ namespace GalacticExpansion.Tests.Unit.Placement
             // Arrange
             var ziraxStructurePosition = new PVector3(50, 100, 50);
             _gatewayMock
-                .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
+                .Setup(g => g.SendRequestAsync<GlobalStructureList>(
                     CmdId.Request_GlobalStructure_List,
                     null,
                     It.IsAny<int>()))
-                .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
+                .ReturnsAsync(new GlobalStructureList
                 {
-                    ["Akua"] = new List<GlobalStructureInfo>
+                    globalStructures = new Dictionary<string, List<GlobalStructureInfo>>
                     {
-                        new GlobalStructureInfo
+                        ["Akua"] = new List<GlobalStructureInfo>
                         {
-                            id = 200,
-                            factionId = 2, // Zirax
-                            pos = ziraxStructurePosition
+                            new GlobalStructureInfo
+                            {
+                                id = 200,
+                                factionId = 2, // Zirax
+                                pos = ziraxStructurePosition
+                            }
                         }
                     }
                 });

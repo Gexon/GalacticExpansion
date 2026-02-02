@@ -51,6 +51,8 @@ namespace GalacticExpansion.Core.Simulation
             if (colony == null)
                 throw new ArgumentNullException(nameof(colony));
 
+            _logger.Debug($"ColonyManager: updating colony {colony.Id} ({colony.Playfield}, stage={colony.Stage}, dt={deltaTime:F2}s)");
+
             try
             {
                 // 1. Обновление производства ресурсов

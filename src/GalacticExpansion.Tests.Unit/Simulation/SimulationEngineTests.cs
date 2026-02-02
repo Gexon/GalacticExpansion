@@ -58,8 +58,8 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             // Act
             await _engine.StartAsync();
 
-            // Assert
-            _mockStateStore.Verify(s => s.LoadAsync(), Times.Once);
+            // Assert: LoadAsync вызывается дважды — начальная загрузка и перезагрузка после InitializeAllModulesAsync (модули могли создать колонию)
+            _mockStateStore.Verify(s => s.LoadAsync(), Times.Exactly(2));
             
             // Cleanup
             await _engine.StopAsync();
@@ -161,10 +161,10 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             await _engine.StartAsync();
 
             // Act
-            await _engine.StartAsync(); // Second call
+            await _engine.StartAsync(); // Second call — должен выйти по раннему return, без повторной загрузки
 
-            // Assert - LoadAsync should only be called once
-            _mockStateStore.Verify(s => s.LoadAsync(), Times.Once);
+            // Assert: LoadAsync вызывается только при первом StartAsync (2 раза: загрузка + перезагрузка после init)
+            _mockStateStore.Verify(s => s.LoadAsync(), Times.Exactly(2));
             
             // Cleanup
             await _engine.StopAsync();

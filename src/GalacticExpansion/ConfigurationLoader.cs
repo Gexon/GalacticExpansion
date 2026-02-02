@@ -55,6 +55,17 @@ namespace GalacticExpansion
                     return CreateDefaultConfiguration();
                 }
 
+                // Подставляем Zirax.Stages по умолчанию, если в конфиге их нет (нужно для эволюции колоний)
+                if (config.Zirax == null || config.Zirax.Stages == null || config.Zirax.Stages.Count == 0)
+                {
+                    var defaults = CreateDefaultConfiguration();
+                    if (config.Zirax == null)
+                        config.Zirax = defaults.Zirax;
+                    else
+                        config.Zirax.Stages = defaults.Zirax?.Stages ?? new System.Collections.Generic.List<StageConfig>();
+                    Logger.Info($"Zirax.Stages not in config or empty; using default ({config.Zirax.Stages?.Count ?? 0} stages)");
+                }
+
                 // Валидируем конфигурацию
                 ValidateConfiguration(config);
 
@@ -128,24 +139,26 @@ namespace GalacticExpansion
                     {
                         new DropShipConfig
                         {
-                            PrefabName = "GLEX_DropShip_T1",
-                            Type = "SV",
+                            // Стандартный префаб Empyrion: стройплощадка (подходит как «посадочная» структура до первой базы)
+                            PrefabName = "BA_ConstructionSite",
+                            Type = "BA",
                             SpawnAltitude = 500f,
                             FlightDurationSeconds = 30
                         }
                     },
+                    // Стандартные префабы Empyrion (Content/Prefab), без кастомных GLEX_*
                     Stages = new System.Collections.Generic.List<StageConfig>
                     {
-                        new StageConfig { Stage = "ConstructionYard", PrefabName = "GLEX_ConstructionYard", RequiredResources = 0, ProductionRate = 100, MinTimeSeconds = 600 },
-                        new StageConfig { Stage = "BaseL1", PrefabName = "GLEX_Base_L1", RequiredResources = 1000, ProductionRate = 150, MinTimeSeconds = 1800 },
-                        new StageConfig { Stage = "BaseL2", PrefabName = "GLEX_Base_L2", RequiredResources = 3000, ProductionRate = 200, MinTimeSeconds = 3600 },
-                        new StageConfig { Stage = "BaseL3", PrefabName = "GLEX_Base_L3", RequiredResources = 6000, ProductionRate = 250, MinTimeSeconds = 7200 },
-                        new StageConfig { Stage = "BaseMax", PrefabName = "GLEX_Base_Max", RequiredResources = 10000, ProductionRate = 300, MinTimeSeconds = 14400 }
+                        new StageConfig { Stage = "ConstructionYard", PrefabName = "BA_ConstructionSite", RequiredResources = 0, ProductionRate = 100, MinTimeSeconds = 600 },
+                        new StageConfig { Stage = "BaseL1", PrefabName = "BA_Zirax_Small_1", RequiredResources = 1000, ProductionRate = 150, MinTimeSeconds = 1800 },
+                        new StageConfig { Stage = "BaseL2", PrefabName = "BA_Zirax_Small_2", RequiredResources = 3000, ProductionRate = 200, MinTimeSeconds = 3600 },
+                        new StageConfig { Stage = "BaseL3", PrefabName = "BA_Zirax_Medium_1", RequiredResources = 6000, ProductionRate = 250, MinTimeSeconds = 7200 },
+                        new StageConfig { Stage = "BaseMax", PrefabName = "BA_Zirax_Large_1", RequiredResources = 10000, ProductionRate = 300, MinTimeSeconds = 14400 }
                     },
                     ResourceOutposts = new System.Collections.Generic.List<ResourceOutpostConfig>
                     {
-                        new ResourceOutpostConfig { Type = "Iron", PrefabName = "GLEX_Miner_Iron", ProductionRate = 75 },
-                        new ResourceOutpostConfig { Type = "Copper", PrefabName = "GLEX_Miner_Copper", ProductionRate = 50 }
+                        new ResourceOutpostConfig { Type = "Iron", PrefabName = "BA_MiningOutpost_Zirax_1", ProductionRate = 75 },
+                        new ResourceOutpostConfig { Type = "Copper", PrefabName = "BA_MiningOutpost_Zirax_2", ProductionRate = 50 }
                     },
                     Guards = new System.Collections.Generic.List<GuardConfig>
                     {

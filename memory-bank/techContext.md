@@ -34,7 +34,13 @@
 
 - NLog, путь к конфигу задается явно в `ModMain`.
 
+## ModAPI: ответы с ошибкой
+
+- При ошибке запроса игра возвращает `CmdId.Event_Error`, данные — `ErrorInfo` (поле `errorType` типа `ErrorType`). В логах и исключениях используется `errorType.ToString()` (например, `EntityNotLocalToPlayfield`, `PlayfieldConnectionNotFound`). См. `EmpyrionGateway.HandleEvent` и `GetErrorMessageFromErrorInfo`.
+
 ## Известные нюансы
 
 - В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`.
 - Контракты интерфейсов должны совпадать с реализациями (порядок параметров важен).
+- `IPlacementResolver.SetModApi(IModApi?)` вызывается в ModMain.Init для поздней инъекции ModApi (точная высота рельефа).
+- Дефолтные префабы колоний — ванильные (BA_ConstructionSite, BA_Zirax_*, BA_MiningOutpost_Zirax_1); задаются в ConfigurationLoader при отсутствии в конфиге.

@@ -315,10 +315,11 @@ namespace GalacticExpansion.Core.Spawning
                 Stage = ColonyStage.LandingPending
             };
 
-            // Спавн DropShip
+            // Спавн «посадочной» структуры (префаб из конфига или стандартный BA_ConstructionSite)
+            var dropPrefab = _config.Zirax?.DropShips?.FirstOrDefault()?.PrefabName ?? "BA_ConstructionSite";
             var dropShipId = await _entitySpawner.SpawnStructureAtTerrainAsync(
                 playfield,
-                "GLEX_DropShip_T1",
+                dropPrefab,
                 position.X,
                 position.Z,
                 factionId,

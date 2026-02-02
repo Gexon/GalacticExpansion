@@ -31,6 +31,10 @@
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
 - Тесты проверяют соответствие контрактам.
 
+### Event_Error Handling (ModAPI)
+- При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo` (поле `errorType` — enum `ErrorType`).
+- Шлюз в `HandleEvent` обрабатывает Event_Error до попытки завершить ответ ожидаемым типом: извлекает текст из `ErrorInfo` (в т.ч. `errorType.ToString()` для понятного кода в логах), вызывает `SequenceManager.CompleteWithError(seqNr, exception)` — вызывающий получает исключение вместо "Type mismatch".
+
 ## Важные инварианты
 
 1. `State.json` всегда валиден (атомарная запись + бэкапы).

@@ -64,7 +64,7 @@ namespace GalacticExpansion
                 _logger = LogManager.GetCurrentClassLogger();
                 
                 _logger.Info("========================================");
-                _logger.Info("GalacticExpansion (GLEX) v1.0 Phase 2");
+                _logger.Info("GalacticExpansion (GLEX) v1.0 Phase 3");
                 _logger.Info("Initializing...");
                 _logger.Info("========================================");
 
@@ -113,8 +113,8 @@ namespace GalacticExpansion
                 _stateStore = new StateStore(modPath);
                 _container.Register<IStateStore>(_stateStore);
 
-                // 7. Инициализируем Phase 2: Core Loop компоненты
-                _logger.Info("Initializing Phase 2 components...");
+                // 7. Инициализируем Phase 2/3: Core Loop и доменные компоненты
+                _logger.Info("Initializing Phase 2/3 components...");
                 
                 // EventBus для внутренней коммуникации модулей
                 var eventBus = new EventBus(_logger);
@@ -154,10 +154,10 @@ namespace GalacticExpansion
                 _logger.Info("Registering Phase 3 domain modules...");
                 
                 // PlacementResolver - поиск мест для структур
-                // Используем IModApi если доступен (расширенный API через IMod.Init для доступа к IPlayfield)
-                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, _extendedModApi);
+                // IModApi в Game_Start ещё нет (появляется в IMod.Init); передаём null, в Init вызовем SetModApi
+                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, modApi: null);
                 _container.Register<IPlacementResolver>(placementResolver);
-                _logger.Info($"PlacementResolver registered (terrain height: {(_extendedModApi != null ? "precise via IPlayfield" : "fallback 100m")})");
+                _logger.Info("PlacementResolver registered (terrain height: will use IPlayfield after IMod.Init, fallback 100m until then)");
 
                 
                 // EntitySpawner - спавн структур и NPC
@@ -201,6 +201,11 @@ namespace GalacticExpansion
                 // ColonyManager не является модулем симуляции, только координатором
                 _container.Register<IColonyManager>(colonyManager);
                 _logger.Info("ColonyManager registered");
+
+                // ColonyTickModule — обновление колоний по тику и создание первой колонии при пустом state
+                var colonyTickModule = new ColonyTickModule(colonyManager, placementResolver, _config, _logger);
+                _simulationEngine.RegisterModule(colonyTickModule);
+                _logger.Info("ColonyTickModule registered");
                 
                 // 9. Запускаем симуляцию
                 _logger.Info("Starting simulation engine...");
@@ -256,7 +261,7 @@ namespace GalacticExpansion
         /// <summary>
         /// Обновление симуляции.
         /// Вызывается каждый тик сервера.
-        /// В Phase 2 SimulationEngine управляет основным циклом через собственный таймер.
+        /// В Phase 3 SimulationEngine управляет основным циклом через собственный таймер.
         /// Здесь остается только периодическое создание бэкапов.
         /// </summary>
         public void Game_Update()
@@ -436,12 +441,17 @@ namespace GalacticExpansion
 
                 // Сохраняем ссылку на IModApi для доступа к расширенным возможностям
                 _extendedModApi = modAPI;
-                _logger.Info("✅ IModApi initialized - PlacementResolver will use IPlayfield.GetTerrainHeightAt() for precise terrain height");
-                _logger.Info("   IApplication.OnPlayfieldLoaded events will cache IPlayfield objects for terrain detection");
 
-                // Примечание: Game_Start уже был вызван с базовым ModGameAPI
-                // PlacementResolver уже создан и зарегистрирован в DI контейнере
-                // IModApi будет использован PlacementResolver через события OnPlayfieldLoaded
+                // Поздняя инъекция IModApi в PlacementResolver (в Game_Start API ещё недоступен)
+                if (_container != null && _container.TryResolve<IPlacementResolver>(out var placementResolver) && placementResolver != null)
+                {
+                    placementResolver.SetModApi(modAPI);
+                    _logger.Info("✅ IModApi passed to PlacementResolver - terrain height via IPlayfield.GetTerrainHeightAt() enabled");
+                }
+                else
+                {
+                    _logger.Info("✅ IModApi initialized (PlacementResolver not resolved, terrain may use fallback)");
+                }
             }
             catch (Exception ex)
             {

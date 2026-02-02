@@ -411,10 +411,10 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             Assert.Equal(999, colony.MainStructureId);
         }
 
-        [Fact(DisplayName = "InitializeColony - спавнит DropShip структуру")]
+        [Fact(DisplayName = "InitializeColony - спавнит посадочную структуру (префаб из конфига или fallback BA_ConstructionSite)")]
         public async Task InitializeColony_SpawnsDropShip_Correctly()
         {
-            // Arrange
+            // Arrange: в тестовом конфиге нет Zirax.DropShips → используется fallback "BA_ConstructionSite"
             var playfield = "Akua";
             var position = new Vector3(1000, 100, -500);
             var factionId = 2;
@@ -425,7 +425,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             // Assert
             _entitySpawnerMock.Verify(e => e.SpawnStructureAtTerrainAsync(
                 playfield,
-                "GLEX_DropShip_T1",
+                "BA_ConstructionSite",
                 position.X,
                 position.Z,
                 factionId,
