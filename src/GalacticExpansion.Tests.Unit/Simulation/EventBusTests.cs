@@ -145,7 +145,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
         }
 
         [Fact]
-        public void EventBus_ShouldBeThreadSafe()
+        public async Task EventBus_ShouldBeThreadSafe()
         {
             // Arrange
             var callCount = 0;
@@ -161,14 +161,14 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             {
                 tasks.Add(Task.Run(() => _eventBus.Subscribe(handler)));
             }
-            Task.WaitAll(tasks.ToArray());
+            await Task.WhenAll(tasks);
 
             tasks.Clear();
             for (int i = 0; i < 10; i++)
             {
                 tasks.Add(Task.Run(() => _eventBus.Publish(new SimulationStartedEvent())));
             }
-            Task.WaitAll(tasks.ToArray());
+            await Task.WhenAll(tasks);
 
             // Assert - Should handle concurrent access without exceptions
             Assert.True(callCount > 0, "At least one handler should be called");
