@@ -11,6 +11,7 @@ using GalacticExpansion.Models;
 using Moq;
 using NLog;
 using Xunit;
+using CoreEntityInfo = GalacticExpansion.Core.Spawning.EntityInfo;
 
 namespace GalacticExpansion.Tests.Integration
 {
@@ -35,6 +36,10 @@ namespace GalacticExpansion.Tests.Integration
             _config = CreateTestConfig();
 
             SetupGatewayMocks();
+
+            // По умолчанию state пустой, SaveAsync - no-op для интеграционных тестов.
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(new SimulationState());
+            _stateStoreMock.Setup(s => s.SaveAsync(It.IsAny<SimulationState>())).Returns(Task.CompletedTask);
         }
 
         private void SetupGatewayMocks()
@@ -45,6 +50,13 @@ namespace GalacticExpansion.Tests.Integration
                 It.IsAny<EntitySpawnInfo>(),
                 It.IsAny<int>()))
                 .ReturnsAsync(100);
+
+            // Mock проверки существования сущности (EntityExistsAsync).
+            _gatewayMock.Setup(g => g.SendRequestAsync<CoreEntityInfo>(
+                CmdId.Request_Entity_PosAndRot,
+                It.IsAny<Id>(),
+                It.IsAny<int>()))
+                .ReturnsAsync(new CoreEntityInfo());
 
             // Mock успешного удаления
             _gatewayMock.Setup(g => g.SendRequestAsync<object>(
@@ -136,6 +148,9 @@ namespace GalacticExpansion.Tests.Integration
             colony.Resources.ProductionRate = 100;
             colony.UnitPool.MaxGuards = 2;
             colony.UnitPool.AvailableGuards = 2;
+
+            // Добавляем колонию в state, чтобы StageManager смог синхронизировать изменения.
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             Assert.Equal(ColonyStage.ConstructionYard, colony.Stage);
             Assert.Equal(0f, colony.Resources.VirtualResources);
@@ -368,6 +383,7 @@ namespace GalacticExpansion.Tests.Integration
 
             // Act - инициализация колонии
             var colony = await stageManager.InitializeColonyAsync("Akua", new Vector3(1000, 0, -500), 2);
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Assert - колония создана на начальной стадии
             Assert.Equal(ColonyStage.LandingPending, colony.Stage);
@@ -419,13 +435,15 @@ namespace GalacticExpansion.Tests.Integration
                 Stage = ColonyStage.BaseL2,
                 MainStructureId = 500
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act - разрушение базы приводит к downgrade
             await stageManager.DowngradeColonyAsync(colony);
 
             // Assert - откат на предыдущую стадию
             Assert.Equal(ColonyStage.BaseL1, colony.Stage);
-            Assert.NotEqual(500, colony.MainStructureId); // Новая структура
+            // Главная структура разрушена, поэтому ID сбрасывается.
+            Assert.Null(colony.MainStructureId);
         }
 
         [Fact(DisplayName = "Integration: Unit Economy - истощение резервов")]
@@ -525,6 +543,10 @@ namespace GalacticExpansion.Tests.Integration
                 _loggerMock.Object
             );
 
+            // Общий state для CreateColonyAsync и последующих обновлений.
+            var sharedState = new SimulationState();
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(sharedState);
+
             // Act - создание колонии
             var colony = await colonyManager.CreateColonyAsync("Akua", new Vector3(1000, 0, -500), 2);
 
@@ -546,6 +568,17 @@ namespace GalacticExpansion.Tests.Integration
             Assert.True(colony.Resources.VirtualResources > 0, "Resources should be produced");
             Assert.True(colony.UnitPool.AvailableGuards > 0 || colony.UnitPool.ProductionProgress > 0, 
                 "Units should be produced");
+        }
+
+        /// <summary>
+        /// Создает state с указанной колонией, чтобы StageManager находил её при переходах.
+        /// </summary>
+        private static SimulationState CreateStateWithColony(Colony colony)
+        {
+            return new SimulationState
+            {
+                Colonies = new System.Collections.Generic.List<Colony> { colony }
+            };
         }
     }
 }

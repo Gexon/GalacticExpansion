@@ -199,10 +199,12 @@ namespace GalacticExpansion.Core.Spawning
                 await _stateStore.SaveAsync(state);
 
                 // 10. Публикация события
+                // Публикуем событие с правильной фиксацией "откуда → куда",
+                // чтобы подписчики могли корректно реагировать на переходы.
                 _eventBus.Publish(new StageTransitionEvent
                 {
                     ColonyId = colony.Id,
-                    PreviousStage = colony.Stage,
+                    PreviousStage = currentStage,
                     NewStage = nextStage
                 });
 

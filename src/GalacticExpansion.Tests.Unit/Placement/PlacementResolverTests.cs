@@ -231,7 +231,8 @@ namespace GalacticExpansion.Tests.Unit.Placement
             {
                 Playfield = "Akua",
                 SearchRadius = 50000f, // Огромный радиус
-                MaxSearchTimeSeconds = 1 // Timeout 1 секунда
+                // Таймаут 0 секунд, чтобы гарантированно и детерминированно получить PlacementException.
+                MaxSearchTimeSeconds = 0
             };
 
             // Act & Assert

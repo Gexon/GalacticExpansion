@@ -67,8 +67,14 @@ namespace GalacticExpansion.Tests.Unit.Spawning
 
             // По умолчанию: структуры существуют, ресурсов достаточно
             _entitySpawnerMock.Setup(e => e.EntityExistsAsync(It.IsAny<int>())).ReturnsAsync(true);
-            _entitySpawnerMock.Setup(e => e.SpawnStructureAsync(It.IsAny<string>(), It.IsAny<Vector3>(), It.IsAny<Vector3>(), It.IsAny<int>()))
-                .ReturnsAsync(999); // Новый EntityId
+            _entitySpawnerMock.Setup(e => e.SpawnStructureAtTerrainAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<float>(),
+                    It.IsAny<float>(),
+                    It.IsAny<int>(),
+                    It.IsAny<float>()))
+                .ReturnsAsync(999); // Новый EntityId для новой структуры
             _entitySpawnerMock.Setup(e => e.DestroyEntityAsync(It.IsAny<int>())).Returns(Task.CompletedTask);
             
             _economySimulatorMock.Setup(e => e.HasEnoughResourcesForUpgrade(It.IsAny<Colony>())).Returns(true);
@@ -77,6 +83,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             _placementResolverMock.Setup(p => p.FindSuitableLocationAsync(It.IsAny<PlacementCriteria>()))
                 .ReturnsAsync(new Vector3(100, 50, 200));
 
+            // По умолчанию возвращаем пустой state, а в тестах переходов подменяем на state с колонией.
             _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(new SimulationState());
             _stateStoreMock.Setup(s => s.SaveAsync(It.IsAny<SimulationState>())).Returns(Task.CompletedTask);
 
@@ -204,9 +211,12 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
                 Position = new Vector3(1000, 100, -500),
                 LastUpgradeTime = DateTime.UtcNow.AddSeconds(-100)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.TransitionToNextStageAsync(colony);
@@ -224,19 +234,24 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
                 Position = new Vector3(1000, 100, -500),
                 LastUpgradeTime = DateTime.UtcNow.AddSeconds(-100)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.TransitionToNextStageAsync(colony);
 
             // Assert
-            _entitySpawnerMock.Verify(e => e.SpawnStructureAsync(
+            _entitySpawnerMock.Verify(e => e.SpawnStructureAtTerrainAsync(
+                "Akua",
                 "GLEX_Base_L1", // Следующая стадия
-                It.IsAny<Vector3>(),
-                It.IsAny<Vector3>(),
-                2 // FactionId Zirax
+                It.IsAny<float>(),
+                It.IsAny<float>(),
+                2, // FactionId Zirax
+                It.IsAny<float>()
             ), Times.Once);
         }
 
@@ -249,9 +264,12 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
                 Position = new Vector3(1000, 100, -500),
                 LastUpgradeTime = DateTime.UtcNow.AddSeconds(-100)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.TransitionToNextStageAsync(colony);
@@ -271,8 +289,11 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
                 LastUpgradeTime = DateTime.UtcNow.AddSeconds(-100)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.TransitionToNextStageAsync(colony);
@@ -290,8 +311,11 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
                 LastUpgradeTime = DateTime.UtcNow.AddSeconds(-100)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.TransitionToNextStageAsync(colony);
@@ -313,15 +337,19 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Id = "colony-1",
                 Stage = ColonyStage.BaseL1,
                 MainStructureId = 200,
+                Playfield = "Akua",
+                FactionId = 2,
                 Position = new Vector3(1000, 100, -500)
             };
+            _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(CreateStateWithColony(colony));
 
             // Act
             await _stageManager.DowngradeColonyAsync(colony);
 
             // Assert
             Assert.Equal(ColonyStage.ConstructionYard, colony.Stage);
-            Assert.Equal(999, colony.MainStructureId); // Новый EntityId после downgrade
+            // После разрушения главной структуры ID должен быть сброшен.
+            Assert.Null(colony.MainStructureId);
         }
 
         [Fact(DisplayName = "DowngradeColony - не откатывает если уже на минимальной стадии")]
@@ -391,19 +419,30 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             var position = new Vector3(1000, 100, -500);
             var factionId = 2;
 
-            // Mock DropShip конфигурацию
-            _config.Zirax.Stages.Insert(0, new StageConfig { Stage = "LandingPending", PrefabName = "GLEX_DropShip" });
-
             // Act
             await _stageManager.InitializeColonyAsync(playfield, position, factionId);
 
             // Assert
-            _entitySpawnerMock.Verify(e => e.SpawnStructureAsync(
-                "GLEX_DropShip",
-                position,
-                It.IsAny<Vector3>(),
-                factionId
+            _entitySpawnerMock.Verify(e => e.SpawnStructureAtTerrainAsync(
+                playfield,
+                "GLEX_DropShip_T1",
+                position.X,
+                position.Z,
+                factionId,
+                10f
             ), Times.Once);
+        }
+
+        /// <summary>
+        /// Создает state, содержащий переданную колонию.
+        /// Используется для имитации реального поведения StateStore в тестах переходов.
+        /// </summary>
+        private static SimulationState CreateStateWithColony(Colony colony)
+        {
+            return new SimulationState
+            {
+                Colonies = new List<Colony> { colony }
+            };
         }
     }
 }

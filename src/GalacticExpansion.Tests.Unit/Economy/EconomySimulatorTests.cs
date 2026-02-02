@@ -25,9 +25,11 @@ namespace GalacticExpansion.Tests.Unit.Economy
                 {
                     Stages = new List<StageConfig>
                     {
-                        new StageConfig { Stage = "ConstructionYard", RequiredResources = 1000 },
-                        new StageConfig { Stage = "BaseL1", RequiredResources = 2000 },
-                        new StageConfig { Stage = "BaseL2", RequiredResources = 5000 }
+                        // Конфигурация выровнена с логикой апгрейдов:
+                        // для перехода с ConstructionYard требуется ресурс уровня BaseL1.
+                        new StageConfig { Stage = "ConstructionYard", RequiredResources = 0 },
+                        new StageConfig { Stage = "BaseL1", RequiredResources = 1000 },
+                        new StageConfig { Stage = "BaseL2", RequiredResources = 2000 }
                     }
                 }
             };

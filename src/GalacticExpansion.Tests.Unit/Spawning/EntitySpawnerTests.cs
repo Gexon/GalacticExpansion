@@ -9,6 +9,7 @@ using GalacticExpansion.Models;
 using Moq;
 using NLog;
 using Xunit;
+using CoreEntityInfo = GalacticExpansion.Core.Spawning.EntityInfo;
 
 namespace GalacticExpansion.Tests.Unit.Spawning
 {
@@ -295,12 +296,13 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task EntityExistsAsync_ReturnsTrue_WhenEntityExists()
         {
             // Arrange
+            // Возвращаем EntityInfo, потому что метод EntityExistsAsync ожидает именно этот тип из gateway.
             _gatewayMock
-                .Setup(g => g.SendRequestAsync<object>(
+                .Setup(g => g.SendRequestAsync<CoreEntityInfo>(
                     CmdId.Request_Entity_PosAndRot,
                     It.IsAny<Id>(),
                     It.IsAny<int>()))
-                .ReturnsAsync(new object());
+                .ReturnsAsync(new CoreEntityInfo());
 
             // Act
             var exists = await _spawner.EntityExistsAsync(123);
@@ -313,8 +315,9 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task EntityExistsAsync_ReturnsFalse_WhenEntityDoesNotExist()
         {
             // Arrange
+            // Исключение имитирует отсутствие сущности в ModAPI (например, сущность удалена).
             _gatewayMock
-                .Setup(g => g.SendRequestAsync<object>(
+                .Setup(g => g.SendRequestAsync<CoreEntityInfo>(
                     CmdId.Request_Entity_PosAndRot,
                     It.IsAny<Id>(),
                     It.IsAny<int>()))

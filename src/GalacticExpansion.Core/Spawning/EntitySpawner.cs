@@ -91,11 +91,17 @@ namespace GalacticExpansion.Core.Spawning
             catch (Exception ex)
             {
                 _logger.Error(ex, $"❌ Error spawning structure '{prefabName}' at {position}");
-                throw new SpawnException($"Failed to spawn '{prefabName}': {ex.Message}", ex);
+                // Если ошибка уже содержит детали спавна, пробрасываем её без потери контекста.
+                if (ex is SpawnException)
+                    throw;
+
+                // Для прочих ошибок создаем исключение с явным указанием prefab и позиции,
+                // чтобы тесты и диагностика получали полную информацию.
+                throw new SpawnException($"Failed to spawn '{prefabName}': {ex.Message}", prefabName, position);
             }
         }
 
-        public async Task<int> SpawnStructureAtTerrainAsync(string prefabName, string playfield, float x, float z,
+        public async Task<int> SpawnStructureAtTerrainAsync(string playfield, string prefabName, float x, float z,
             int factionId, float heightOffset = 0.5f)
         {
             if (string.IsNullOrEmpty(prefabName))
@@ -103,6 +109,8 @@ namespace GalacticExpansion.Core.Spawning
             if (string.IsNullOrEmpty(playfield))
                 throw new ArgumentException("Playfield name cannot be empty", nameof(playfield));
 
+            // ВАЖНО: порядок параметров соответствует интерфейсу IEntitySpawner,
+            // чтобы playfield и prefabName не путались при вызовах из других модулей.
             _logger.Debug($"Finding terrain location for '{prefabName}' at ({x}, {z}) on '{playfield}'");
 
             try
@@ -117,12 +125,14 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
-        public async Task<List<int>> SpawnNPCGroupAsync(string npcClassName, string factionName, Vector3 centerPosition,
-            int count, string playfield)
+        public async Task<List<int>> SpawnNPCGroupAsync(string playfield, string npcClassName, Vector3 centerPosition,
+            int count, string factionName)
         {
             if (count <= 0)
                 throw new ArgumentException("Count must be positive", nameof(count));
 
+            // Параметры идут в том же порядке, что и в интерфейсе:
+            // сначала playfield, затем класс NPC, затем позиция и количество.
             _logger.Info($"Spawning {count}x '{npcClassName}' at {centerPosition} (faction={factionName})");
 
             var spawnedIds = new List<int>();
@@ -136,8 +146,12 @@ namespace GalacticExpansion.Core.Spawning
 
                     try
                     {
-                        int entityId = await SpawnNPCAtTerrainAsync(playfield, npcClassName, centerPosition.X + offsetX,
-                            centerPosition.Z + offsetZ, factionName);
+                        int entityId = await SpawnNPCAtTerrainAsync(
+                            playfield,
+                            npcClassName,
+                            centerPosition.X + offsetX,
+                            centerPosition.Z + offsetZ,
+                            factionName);
                         spawnedIds.Add(entityId);
 
                         if (i < count - 1)
