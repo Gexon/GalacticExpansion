@@ -446,3 +446,130 @@ public class TrackedPlayerInfo { ... }
    - Логистические рейсы (визуальный эффект)
 8. **Hostility Tracker** — система "Most Wanted" для охоты на врагов
 9. **Colony Evolution** — постепенная экспансия к родной планете врага
+
+---
+
+## Архитектурные паттерны (обновлено 02.02.2026)
+
+### 1. Dependency Injection
+```csharp
+public class SimulationEngine(
+    IStateStore store,
+    IEventBus bus,
+    IModuleRegistry registry
+) { }
+```
+
+### 2. Repository Pattern
+```csharp
+interface IStateStore {
+    Task<SimulationState> LoadAsync();
+    Task SaveAsync(SimulationState state);
+}
+```
+
+### 3. Event-Driven Architecture
+- EventBus для слабого связывания модулей
+- Подписка на события вместо прямых вызовов
+
+### 4. Command Pattern
+```csharp
+interface IAIMOrchestrator {
+    Task ExecuteGuardAreaAsync(int playerId, int range);
+}
+```
+
+### 5. Strategy Pattern
+- PlacementResolver с разными стратегиями размещения
+- Расширяемость для новых типов структур
+
+### 6. Wrapper Pattern ✨ НОВЫЙ (02.02.2026)
+
+**Проблема:** 
+- IPlayfield и IModApi зависят от Unity (UnityEngine.CoreModule)
+- Moq не может создать proxy для Unity-зависимых интерфейсов в тестах
+- Ошибка: `FileNotFoundException: UnityEngine.CoreModule`
+
+**Решение:**
+```csharp
+// Wrapper-интерфейс (чистый C#, без Unity)
+public interface IPlayfieldWrapper
+{
+    float GetTerrainHeight(float x, float z);
+    string Name { get; }
+}
+
+// Production реализация (использует реальный IPlayfield)
+public class PlayfieldWrapper : IPlayfieldWrapper
+{
+    private readonly IPlayfield _playfield;
+    
+    public PlayfieldWrapper(IPlayfield playfield) 
+    {
+        _playfield = playfield;
+    }
+    
+    public float GetTerrainHeight(float x, float z) 
+    {
+        return _playfield.GetTerrainHeightAt(x, z);
+    }
+    
+    public string Name => _playfield.Name;
+}
+
+// Использование в PlacementResolver
+public class PlacementResolver
+{
+    private readonly Dictionary<string, IPlayfieldWrapper> _playfieldCache;
+    
+    public PlacementResolver(IModApi? modApi)
+    {
+        if (modApi != null)
+        {
+            modApi.Application.OnPlayfieldLoaded += (playfield) =>
+            {
+                // Оборачиваем IPlayfield в wrapper
+                _playfieldCache[playfield.Name] = new PlayfieldWrapper(playfield);
+            };
+        }
+    }
+}
+```
+
+**В тестах:**
+```csharp
+// Моки работают без проблем!
+var mockPlayfieldWrapper = new Mock<IPlayfieldWrapper>();
+mockPlayfieldWrapper.Setup(p => p.GetTerrainHeight(100f, 200f)).Returns(123.45f);
+
+var height = resolver.GetTerrainHeight(mockPlayfieldWrapper.Object, 100f, 200f);
+```
+
+**Преимущества:**
+- ✅ Изоляция Unity зависимостей
+- ✅ Полная тестируемость (Moq работает)
+- ✅ Production код остается чистым
+- ✅ Легко расширять (добавлять методы в wrapper)
+
+**Файлы:**
+- `src/GalacticExpansion.Core/Gateway/IPlayfieldWrapper.cs`
+- `src/GalacticExpansion.Core/Gateway/PlayfieldWrapper.cs`
+
+---
+
+## Решенные технические проблемы (02.02.2026)
+
+### Проблема #1: UnityEngine.CoreModule в тестах
+**Симптом:** `FileNotFoundException: UnityEngine.CoreModule` при запуске PlacementResolverTests  
+**Причина:** Moq пытается создать proxy для IPlayfield, который зависит от Unity  
+**Решение:** Wrapper Pattern - IPlayfieldWrapper изолирует Unity, Mock<IPlayfieldWrapper> работает  
+
+### Проблема #2: Потеря данных при сохранении state
+**Симптом:** Изменения в Colony не сохраняются в state.json  
+**Причина:** Код изменял объект, затем загружал НОВЫЙ state → изменения терялись  
+**Решение:** Загружать state → изменять объект ИЗ загруженного state → сохранять  
+
+### Проблема #3: Логические ошибки в тестах
+**Симптом:** Тесты падают с непонятными сообщениями  
+**Причина:** Неправильные ожидания (assert для текущей стадии вместо следующей)  
+**Решение:** Пересмотреть логику тестов, добавить комментарии с объяснениями
