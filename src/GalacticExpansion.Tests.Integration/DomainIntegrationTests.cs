@@ -43,23 +43,20 @@ namespace GalacticExpansion.Tests.Integration
             _gatewayMock.Setup(g => g.SendRequestAsync<int>(
                 CmdId.Request_Entity_Spawn,
                 It.IsAny<EntitySpawnInfo>(),
-                It.IsAny<int>(),
                 It.IsAny<int>()))
                 .ReturnsAsync(100);
 
             // Mock успешного удаления
             _gatewayMock.Setup(g => g.SendRequestAsync<object>(
                 CmdId.Request_Entity_Destroy,
-                It.IsAny<IdStructure>(),
-                It.IsAny<int>(),
+                It.IsAny<Id>(),
                 It.IsAny<int>()))
                 .ReturnsAsync(new object());
 
             // Mock Touch структур
             _gatewayMock.Setup(g => g.SendRequestAsync<object>(
                 CmdId.Request_Structure_Touch,
-                It.IsAny<IdStructure>(),
-                It.IsAny<int>(),
+                It.IsAny<Id>(),
                 It.IsAny<int>()))
                 .ReturnsAsync(new object());
         }
@@ -178,7 +175,7 @@ namespace GalacticExpansion.Tests.Integration
 
             // Добавление аванпоста (+20% бонус)
             colony.Resources.VirtualResources = 0;
-            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = "Iron" });
+            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = ResourceNodeType.Iron });
 
             economySimulator.UpdateProduction(colony, deltaTime: 10.0f);
             var bonusProduction = colony.Resources.VirtualResources; // 1200
@@ -244,8 +241,8 @@ namespace GalacticExpansion.Tests.Integration
             };
 
             // Добавление 2 аванпостов
-            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = "Iron" });
-            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost2", Type = "Copper" });
+            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = ResourceNodeType.Iron });
+            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost2", Type = ResourceNodeType.Copper });
 
             Assert.Equal(40f, colony.Resources.ProductionBonus); // 2 * 20%
 
@@ -281,7 +278,7 @@ namespace GalacticExpansion.Tests.Integration
             var baseTime = economySimulator.GetTimeUntilNextUpgradeSeconds(colony, requiredResources: 1000);
 
             // Добавление аванпоста (+20%)
-            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = "Iron" });
+            economySimulator.AddResourceNode(colony, new ResourceNode { Id = "outpost1", Type = ResourceNodeType.Iron });
             var bonusTime = economySimulator.GetTimeUntilNextUpgradeSeconds(colony, requiredResources: 1000);
 
             // Assert

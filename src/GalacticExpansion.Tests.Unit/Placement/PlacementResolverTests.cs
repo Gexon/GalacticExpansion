@@ -101,10 +101,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
             // Assert
             Assert.NotNull(position);
             // Позиция должна быть близко к preferredLocation (в пределах SearchRadius)
-            var distance = Vector3.Distance(
-                new Vector3(position.X, preferredLocation.Y, position.Z),
-                preferredLocation
-            );
+            var distance = position.DistanceTo2D(preferredLocation);
             Assert.True(distance <= criteria.SearchRadius, $"Distance {distance} exceeds SearchRadius {criteria.SearchRadius}");
         }
 
@@ -120,7 +117,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                     {
                         PlayerName = "TestPlayer",
                         Position = playerPosition,
-                        Playfield = "Akua"
+                        CurrentPlayfield = "Akua"
                     }
                 });
 
@@ -136,7 +133,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
             var position = await _resolver.FindSuitableLocationAsync(criteria);
 
             // Assert
-            var distance = Vector3.Distance(position, playerPosition);
+            var distance = position.DistanceTo(playerPosition);
             Assert.True(distance >= criteria.MinDistanceFromPlayers,
                 $"Position {position} too close to player (distance={distance}, required={criteria.MinDistanceFromPlayers})");
         }
@@ -150,7 +147,6 @@ namespace GalacticExpansion.Tests.Unit.Placement
                 .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
                     CmdId.Request_GlobalStructure_List,
                     null,
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
                 {
@@ -160,8 +156,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                         {
                             id = 100,
                             factionId = 1, // Не Zirax (2)
-                            pos = structurePosition,
-                            playfield = "Akua"
+                            pos = structurePosition
                         }
                     }
                 });
@@ -172,14 +167,15 @@ namespace GalacticExpansion.Tests.Unit.Placement
                 MinDistanceFromPlayerStructures = 1000f,
                 SearchRadius = 2000f,
                 FactionId = 2, // Zirax
-                PreferredLocation = structurePosition.ToVector3()
+                PreferredLocation = new Vector3(structurePosition.x, structurePosition.y, structurePosition.z)
             };
 
             // Act
             var position = await _resolver.FindSuitableLocationAsync(criteria);
 
             // Assert
-            var distance = Vector3.Distance(position, structurePosition.ToVector3());
+            var structPosVector = new Vector3(structurePosition.x, structurePosition.y, structurePosition.z);
+            var distance = position.DistanceTo(structPosVector);
             Assert.True(distance >= criteria.MinDistanceFromPlayerStructures,
                 $"Position too close to player structure (distance={distance}, required={criteria.MinDistanceFromPlayerStructures})");
         }
@@ -193,7 +189,6 @@ namespace GalacticExpansion.Tests.Unit.Placement
                 .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
                     CmdId.Request_GlobalStructure_List,
                     null,
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
                 {
@@ -203,8 +198,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                         {
                             id = 200,
                             factionId = 2, // Zirax
-                            pos = ziraxStructurePosition,
-                            playfield = "Akua"
+                            pos = ziraxStructurePosition
                         }
                     }
                 });
@@ -215,7 +209,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                 MinDistanceFromPlayerStructures = 1000f,
                 FactionId = 2, // Zirax
                 SearchRadius = 100f,
-                PreferredLocation = ziraxStructurePosition.ToVector3()
+                PreferredLocation = new Vector3(ziraxStructurePosition.x, ziraxStructurePosition.y, ziraxStructurePosition.z)
             };
 
             // Act
@@ -223,7 +217,8 @@ namespace GalacticExpansion.Tests.Unit.Placement
 
             // Assert - должно найти место рядом со своей структурой (игнорируя её)
             Assert.NotNull(position);
-            var distance = Vector3.Distance(position, ziraxStructurePosition.ToVector3());
+            var ziraxPosVector = new Vector3(ziraxStructurePosition.x, ziraxStructurePosition.y, ziraxStructurePosition.z);
+            var distance = position.DistanceTo(ziraxPosVector);
             Assert.True(distance < criteria.MinDistanceFromPlayerStructures,
                 "Own faction structures should be ignored");
         }
@@ -257,8 +252,8 @@ namespace GalacticExpansion.Tests.Unit.Placement
                     new TrackedPlayerInfo
                     {
                         PlayerName = "Blocker",
-                        Position = Vector3.Zero,
-                        Playfield = "Akua"
+                        Position = new Vector3(),
+                        CurrentPlayfield = "Akua"
                     }
                 });
 
@@ -267,7 +262,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                 Playfield = "Akua",
                 MinDistanceFromPlayers = 10000f, // Огромная дистанция
                 SearchRadius = 100f, // Маленький радиус поиска
-                PreferredLocation = Vector3.Zero
+                PreferredLocation = new Vector3()
             };
 
             // Act & Assert
@@ -352,7 +347,7 @@ namespace GalacticExpansion.Tests.Unit.Placement
                     {
                         PlayerName = "TestPlayer",
                         Position = new Vector3(100, 100, 100),
-                        Playfield = "Akua"
+                        CurrentPlayfield = "Akua"
                     }
                 });
 

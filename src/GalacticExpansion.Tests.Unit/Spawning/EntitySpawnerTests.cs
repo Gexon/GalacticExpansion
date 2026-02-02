@@ -39,7 +39,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<int>(
                     CmdId.Request_Entity_Spawn,
                     It.IsAny<EntitySpawnInfo>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(12345); // Валидный EntityId
 
@@ -70,7 +69,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             // Arrange
             var prefabName = "GLEX_Base_L1";
             var position = new Vector3(1000, 100, -500);
-            var rotation = Vector3.Zero;
+            var rotation = new Vector3();
             var factionId = 2;
 
             // Act
@@ -84,7 +83,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                     It.Is<EntitySpawnInfo>(info =>
                         info.prefabName == prefabName &&
                         info.factionId == factionId),
-                    It.IsAny<int>(),
                     It.IsAny<int>()),
                 Times.Once);
         }
@@ -94,7 +92,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         {
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentException>(
-                () => _spawner.SpawnStructureAsync("", Vector3.Zero, Vector3.Zero, 2)
+                () => _spawner.SpawnStructureAsync("", new Vector3(), new Vector3(), 2)
             );
         }
 
@@ -106,13 +104,12 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<int>(
                     CmdId.Request_Entity_Spawn,
                     It.IsAny<EntitySpawnInfo>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(0); // Невалидный EntityId
 
             // Act & Assert
             var exception = await Assert.ThrowsAsync<SpawnException>(
-                () => _spawner.SpawnStructureAsync("TestPrefab", Vector3.Zero, Vector3.Zero, 2)
+                () => _spawner.SpawnStructureAsync("TestPrefab", new Vector3(), new Vector3(), 2)
             );
 
             Assert.Contains("invalid EntityId", exception.Message);
@@ -128,7 +125,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<int>(
                     CmdId.Request_Entity_Spawn,
                     It.IsAny<EntitySpawnInfo>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .Returns(() =>
                 {
@@ -139,7 +135,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 });
 
             // Act
-            var entityId = await _spawner.SpawnStructureAsync("TestPrefab", Vector3.Zero, Vector3.Zero, 2);
+            var entityId = await _spawner.SpawnStructureAsync("TestPrefab", new Vector3(), new Vector3(), 2);
 
             // Assert
             Assert.Equal(12345, entityId);
@@ -196,7 +192,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<int>(
                     CmdId.Request_Entity_Spawn,
                     It.IsAny<EntitySpawnInfo>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .Returns(() => Task.FromResult(spawnedEntityIds[callIndex++]));
 
@@ -216,7 +211,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 g => g.SendRequestAsync<int>(
                     CmdId.Request_Entity_Spawn,
                     It.IsAny<EntitySpawnInfo>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()),
                 Times.Exactly(count));
         }
@@ -226,11 +220,11 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         {
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentException>(
-                () => _spawner.SpawnNPCGroupAsync("Akua", "TestNPC", Vector3.Zero, 0, "Zirax")
+                () => _spawner.SpawnNPCGroupAsync("Akua", "TestNPC", new Vector3(), 0, "Zirax")
             );
 
             await Assert.ThrowsAsync<ArgumentException>(
-                () => _spawner.SpawnNPCGroupAsync("Akua", "TestNPC", Vector3.Zero, -1, "Zirax")
+                () => _spawner.SpawnNPCGroupAsync("Akua", "TestNPC", new Vector3(), -1, "Zirax")
             );
         }
 
@@ -247,8 +241,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             _gatewayMock.Verify(
                 g => g.SendRequestAsync<object>(
                     CmdId.Request_Entity_Destroy,
-                    It.Is<IdStructure>(id => id.id == entityId),
-                    It.IsAny<int>(),
+                    It.Is<Id>(id => id.id == entityId),
                     It.IsAny<int>()),
                 Times.Once);
         }
@@ -264,8 +257,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             _gatewayMock.Verify(
                 g => g.SendRequestAsync<object>(
                     CmdId.Request_Entity_Destroy,
-                    It.IsAny<IdStructure>(),
-                    It.IsAny<int>(),
+                    It.IsAny<Id>(),
                     It.IsAny<int>()),
                 Times.Never);
         }
@@ -284,8 +276,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             _gatewayMock.Verify(
                 g => g.SendRequestAsync<object>(
                     CmdId.Request_Entity_Destroy,
-                    It.IsAny<IdStructure>(),
-                    It.IsAny<int>(),
+                    It.IsAny<Id>(),
                     It.IsAny<int>()),
                 Times.Exactly(3));
         }
@@ -308,7 +299,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<object>(
                     CmdId.Request_Entity_PosAndRot,
                     It.IsAny<Id>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(new object());
 
@@ -327,7 +317,6 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .Setup(g => g.SendRequestAsync<object>(
                     CmdId.Request_Entity_PosAndRot,
                     It.IsAny<Id>(),
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ThrowsAsync(new Exception("Entity not found"));
 

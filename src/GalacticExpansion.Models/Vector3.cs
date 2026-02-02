@@ -99,5 +99,16 @@ namespace GalacticExpansion.Models
         {
             return new Vector3(X, Y, Z);
         }
+
+        /// <summary>
+        /// Статический метод для вычисления расстояния между двумя точками
+        /// </summary>
+        public static float Distance(Vector3 a, Vector3 b)
+        {
+            float dx = a.X - b.X;
+            float dy = a.Y - b.Y;
+            float dz = a.Z - b.Z;
+            return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
     }
 }

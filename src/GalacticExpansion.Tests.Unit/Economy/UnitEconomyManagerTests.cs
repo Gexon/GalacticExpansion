@@ -92,7 +92,7 @@ namespace GalacticExpansion.Tests.Unit.Economy
             var reserved = _manager.ReserveUnits(colony, UnitType.Guard, count: 3);
 
             // Assert
-            Assert.Equal(3, reserved);
+            Assert.True(reserved);
             Assert.Equal(7, colony.UnitPool.AvailableGuards);
         }
 
@@ -121,7 +121,7 @@ namespace GalacticExpansion.Tests.Unit.Economy
             {
                 UnitPool = new UnitPool()
             };
-            colony.UnitPool.ActiveUnits.Add(new ActiveUnit(123, "Guard"));
+            colony.UnitPool.ActiveUnits.Add(new ActiveUnit(123, "Guard", "Defense"));
 
             // Act
             _manager.RecordUnitLoss(colony, entityId: 123);
