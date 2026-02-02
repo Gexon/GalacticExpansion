@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Eleon.Modding;
 using GalacticExpansion.Core.Gateway;
@@ -13,22 +14,67 @@ namespace GalacticExpansion.Core.Placement
     /// <summary>
     /// Реализация интерфейса IPlacementResolver для поиска подходящих мест размещения структур.
     /// Использует спиральный алгоритм поиска с адаптивным шагом.
+    /// 
+    /// ПРИМЕЧАНИЕ: Интеграция с IPlayfield.GetTerrainHeightAt() требует расширенного API (IModApi через IMod.Init).
+    /// При базовом API (только ModGameAPI через ModInterface.Game_Start) используется fallback с фиксированной высотой,
+    /// т.к. ModGameAPI не предоставляет доступ к IApplication и IPlayfield.
+    /// Оба режима работают на Dedicated Server, разница только в доступном API.
     /// </summary>
     public class PlacementResolver : IPlacementResolver
     {
         private readonly IEmpyrionGateway _gateway;
         private readonly IPlayerTracker _playerTracker;
         private readonly ILogger _logger;
+        private readonly Dictionary<string, IPlayfield> _playfieldCache;
         private const float DefaultStepSize = 50f;
+        private const float DefaultTerrainHeight = 100f; // Высота по умолчанию для fallback
 
+        /// <summary>
+        /// Конструктор PlacementResolver
+        /// </summary>
+        /// <param name="gateway">Шлюз для взаимодействия с Empyrion API</param>
+        /// <param name="playerTracker">Трекер игроков для проверки дистанций</param>
+        /// <param name="logger">Логгер</param>
+        /// <param name="modApi">Опциональный IModApi (расширенный API) для доступа к IPlayfield через события</param>
         public PlacementResolver(
             IEmpyrionGateway gateway,
             IPlayerTracker playerTracker,
-            ILogger logger)
+            ILogger logger,
+            IModApi? modApi = null)
         {
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _playerTracker = playerTracker ?? throw new ArgumentNullException(nameof(playerTracker));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _playfieldCache = new Dictionary<string, IPlayfield>();
+
+            // Если доступен IModApi (расширенный API через IMod.Init), подписываемся на события playfield'ов
+            if (modApi != null && modApi.Application != null)
+            {
+                _logger.Info("IModApi available - enabling terrain height detection via IPlayfield");
+                
+                modApi.Application.OnPlayfieldLoaded += (playfield) =>
+                {
+                    if (playfield != null)
+                    {
+                        _playfieldCache[playfield.Name] = playfield;
+                        _logger.Debug($"Cached playfield: {playfield.Name}");
+                    }
+                };
+
+                modApi.Application.OnPlayfieldUnloading += (playfield) =>
+                {
+                    if (playfield != null && _playfieldCache.ContainsKey(playfield.Name))
+                    {
+                        _playfieldCache.Remove(playfield.Name);
+                        _logger.Debug($"Removed playfield from cache: {playfield.Name}");
+                    }
+                };
+            }
+            else
+            {
+                _logger.Warn("IModApi not available (base ModGameAPI only) - terrain height detection unavailable, using fallback");
+                _logger.Warn("For precise terrain height, ensure IMod.Init is called with IModApi");
+            }
         }
 
         public async Task<Vector3> FindSuitableLocationAsync(PlacementCriteria criteria)
@@ -187,18 +233,48 @@ namespace GalacticExpansion.Core.Placement
             }
         }
 
+        /// <summary>
+        /// Находит позицию на рельефе с точной высотой (если доступен IPlayfield) или fallback.
+        /// 
+        /// С IModApi (расширенный API): Использует IPlayfield.GetTerrainHeightAt() для точной высоты рельефа.
+        /// Без IModApi (базовый API): Использует фиксированную высоту 100м (ModGameAPI не предоставляет IPlayfield).
+        /// 
+        /// Оба режима работают на Dedicated Server. Это решает проблему спавна структур под землей или в воздухе.
+        /// </summary>
+        /// <param name="playfieldName">Название playfield</param>
+        /// <param name="x">Координата X</param>
+        /// <param name="z">Координата Z</param>
+        /// <param name="heightOffset">Отступ над поверхностью земли (метры), по умолчанию 0.5м</param>
+        /// <returns>Vector3 с координатой Y</returns>
         public async Task<Vector3> FindLocationAtTerrainAsync(
             string playfieldName, float x, float z, float heightOffset = 0.5f)
         {
             if (string.IsNullOrEmpty(playfieldName))
                 throw new ArgumentException("Playfield name cannot be empty", nameof(playfieldName));
 
-            // TODO: Интегрировать с IPlayfield.GetTerrainHeightAt() через ModAPI
-            // Временно используем фиксированную высоту
-            float terrainHeight = 100f;
+            float terrainHeight = DefaultTerrainHeight;
 
+            // Пытаемся получить точную высоту если playfield закэширован (требует IModApi)
+            if (_playfieldCache.TryGetValue(playfieldName, out var playfield))
+            {
+                try
+                {
+                    terrainHeight = GetTerrainHeight(playfield, x, z);
+                    _logger.Trace($"Got precise terrain height {terrainHeight:F1}m for {playfieldName} at ({x:F1}, {z:F1})");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, $"Failed to get terrain height for {playfieldName}, using fallback {DefaultTerrainHeight}m");
+                    terrainHeight = DefaultTerrainHeight;
+                }
+            }
+            else
+            {
+                _logger.Trace($"Playfield '{playfieldName}' not in cache, using fallback height {DefaultTerrainHeight}m");
+            }
+            
             var position = new Vector3(x, terrainHeight + heightOffset, z);
-            _logger.Trace($"Terrain position at ({x:F1}, {z:F1}) = Y {position.Y:F1}m");
+            _logger.Trace($"Terrain position at ({x:F1}, {z:F1}) = Y {position.Y:F1}m (terrain={terrainHeight:F1}m + offset={heightOffset:F1}m)");
 
             return await Task.FromResult(position);
         }

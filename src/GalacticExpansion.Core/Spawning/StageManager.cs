@@ -166,7 +166,36 @@ namespace GalacticExpansion.Core.Spawning
                 await TouchStructure(newStructureId);
 
                 // 9. Сохранение state
+                // КРИТИЧНО: Загружаем актуальный state и синхронизируем ВСЕ изменения
                 var state = await _stateStore.LoadAsync();
+                var colonyInState = state.Colonies.FirstOrDefault(c => c.Id == colony.Id);
+                
+                if (colonyInState == null)
+                {
+                    _logger.Error($"Colony {colony.Id} not found in state after transition! This should not happen.");
+                    throw new InvalidOperationException($"Colony {colony.Id} disappeared from state during transition");
+                }
+
+                // Синхронизируем критичные изменения из colony в colonyInState
+                colonyInState.Stage = colony.Stage;
+                colonyInState.MainStructureId = colony.MainStructureId;
+                colonyInState.LastUpgradeTime = colony.LastUpgradeTime;
+                
+                // Resources - обновляем после ConsumeResourcesForUpgrade
+                colonyInState.Resources.VirtualResources = colony.Resources.VirtualResources;
+                colonyInState.Resources.ProductionRate = colony.Resources.ProductionRate;
+                colonyInState.Resources.ProductionBonus = colony.Resources.ProductionBonus;
+                
+                // UnitPool - обновляем MaxGuards после RecalculateCapacity
+                colonyInState.UnitPool.MaxGuards = colony.UnitPool.MaxGuards;
+                colonyInState.UnitPool.MaxPatrolVessels = colony.UnitPool.MaxPatrolVessels;
+                colonyInState.UnitPool.MaxWarships = colony.UnitPool.MaxWarships;
+                colonyInState.UnitPool.MaxDrones = colony.UnitPool.MaxDrones;
+                
+                // ActiveUnits - синхронизируем список активных юнитов после RegisterActiveUnit
+                colonyInState.UnitPool.ActiveUnits.Clear();
+                colonyInState.UnitPool.ActiveUnits.AddRange(colony.UnitPool.ActiveUnits);
+                
                 await _stateStore.SaveAsync(state);
 
                 // 10. Публикация события
@@ -200,10 +229,25 @@ namespace GalacticExpansion.Core.Spawning
 
             _logger.Warn($"Colony {colony.Id}: Downgrading from {colony.Stage} to {previousStage.Value}");
 
-            colony.Stage = previousStage.Value;
-            colony.MainStructureId = null;
-
+            // КРИТИЧНО: Загружаем state СНАЧАЛА, затем изменяем объект ИЗ state
             var state = await _stateStore.LoadAsync();
+            var colonyInState = state.Colonies.FirstOrDefault(c => c.Id == colony.Id);
+            
+            if (colonyInState == null)
+            {
+                _logger.Error($"Colony {colony.Id} not found in state! Cannot downgrade.");
+                return;
+            }
+
+            // Обновляем данные колонии В state (не в параметре!)
+            colonyInState.Stage = previousStage.Value;
+            colonyInState.MainStructureId = null;
+
+            // Синхронизируем параметр colony с изменениями (для возврата вызывающему коду)
+            colony.Stage = colonyInState.Stage;
+            colony.MainStructureId = colonyInState.MainStructureId;
+
+            // Сохраняем изменения
             await _stateStore.SaveAsync(state);
         }
 

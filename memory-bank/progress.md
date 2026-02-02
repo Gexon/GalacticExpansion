@@ -263,10 +263,10 @@ ProductionRate = BaseRate × (1 + OutpostCount × 0.25) ×
 
 ---
 
-### Phase 3: Domain (Недели 5-7) — ЧАСТИЧНО РЕАЛИЗОВАНА ⚠️
+### Phase 3: Domain (Недели 5-7) — ЧАСТИЧНО РЕАЛИЗОВАНА ⚠️ + КРИТИЧНЫЕ БАГИ ИСПРАВЛЕНЫ ✅
 
 **Дата:** 02.02.2026  
-**Статус:** Код скомпилирован (✅), тесты требуют доработки (❌)
+**Статус:** Код скомпилирован (✅), критичные баги исправлены (✅), тесты требуют доработки (❌)
 
 **Spawning & Evolution:**
 - ✅ Entity Spawner (структуры) — реализован с retry логикой
@@ -275,12 +275,14 @@ ProductionRate = BaseRate × (1 + OutpostCount × 0.25) ×
 - ✅ Stage Manager (FSM) — полный lifecycle: init → upgrade → downgrade
 - ⚠️ Prefab Registry — используется через конфигурацию
 - ✅ Логика переходов стадий — TransitionToNextStageAsync, CanTransitionToNextStageAsync
+- ✅ **BUG FIX:** Исправлена проблема с сохранением state (загрузка → изменение → сохранение)
 
 **Placement Resolver:**
 - ✅ Алгоритм спирального поиска — реализован
 - ✅ Проверки дистанций — от игроков и структур
-- ⚠️ Эвристика высоты — временно фиксированная 100м (TODO: IPlayfield.GetTerrainHeightAt)
-- ❌ Unit-тесты алгоритма — 6 тестов написаны, но требуют исправления PlacementCriteria
+- ✅ **Интеграция IPlayfield.GetTerrainHeightAt()** — реализована через IMod.Init + кэширование playfield'ов
+- ✅ Fallback высота 100м — для базового API (ModGameAPI)
+- ⚠️ Unit-тесты алгоритма — 6 тестов написаны, но требуют исправления PlacementCriteria
 
 **Economy Sim:**
 - ✅ Система виртуальных ресурсов — Resources.VirtualResources
@@ -302,6 +304,7 @@ ProductionRate = BaseRate × (1 + OutpostCount × 0.25) ×
 - ✅ UpdateColonyAsync — координация всех модулей
 - ✅ CreateColonyAsync — создание через StageManager
 - ✅ RemoveColonyAsync — удаление с очисткой state
+- ✅ **BUG FIX:** Исправлена потеря данных при RemoveColonyAsync (убрана повторная загрузка state)
 
 **Тестирование Phase 3:**
 - ❌ PlacementResolverTests — 6 тестов с ошибками (Center → PreferredLocation)
@@ -323,6 +326,17 @@ ProductionRate = BaseRate × (1 + OutpostCount × 0.25) ×
 8. IApplication удалён из PlacementResolver — 1 место
 9. ColonyManager не ISimulationModule — 1 место
 10. Множественные сигнатуры методов выровнены с интерфейсами
+
+**Исправленные критичные баги (3 шт.):**
+1. ✅ **StageManager.TransitionToNextStageAsync** — изменения колонии не сохранялись (неправильный порядок загрузки/изменения/сохранения state)
+2. ✅ **StageManager.DowngradeColonyAsync** — изменения Stage и MainStructureId терялись при сохранении
+3. ✅ **ColonyManager.RemoveColonyAsync** — повторная загрузка state отменяла операцию Remove
+
+**Реализованные улучшения:**
+1. ✅ **ModMain** — добавлена реализация IMod для доступа к расширенному API (IModApi)
+2. ✅ **PlacementResolver** — интеграция с IPlayfield.GetTerrainHeightAt() через кэширование playfield'ов
+3. ✅ **Комментарии** — убраны упоминания "клиент", уточнена терминология (базовый/расширенный API)
+4. ✅ **Конфигурация** — убран PfServer из ModTargets (не нужен для нашей логики)
 
 ---
 

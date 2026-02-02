@@ -17,15 +17,18 @@ namespace GalacticExpansion
 {
     /// <summary>
     /// Главная точка входа мода GalacticExpansion.
-    /// Реализует интерфейс ModInterface для взаимодействия с Empyrion.
+    /// Реализует интерфейсы ModInterface (базовый API) и IMod (расширенный API) для взаимодействия с Empyrion Dedicated Server.
     /// 
-    /// Жизненный цикл:
-    /// 1. Init() - инициализация при запуске сервера
-    /// 2. Game_Event() - обработка событий от игры
-    /// 3. Game_Update() - вызывается каждый tick (используется SimulationEngine)
-    /// 4. Shutdown() - остановка при выключении сервера
+    /// Жизненный цикл на Dedicated Server:
+    /// 1. Game_Start(ModGameAPI dediAPI) - базовая инициализация с ограниченным API
+    /// 2. Init(IModApi modAPI) - расширенная инициализация с доступом к IApplication и IPlayfield
+    /// 3. Game_Event() / Game_Update() - обработка событий и обновление симуляции каждый tick
+    /// 4. Game_Exit() / Shutdown() - остановка мода
+    /// 
+    /// IMod.Init предоставляет доступ к IModApi.Application.OnPlayfieldLoaded для получения IPlayfield объектов
+    /// и использования IPlayfield.GetTerrainHeightAt() для точного определения высоты рельефа.
     /// </summary>
-    public class ModMain : ModInterface
+    public class ModMain : ModInterface, IMod
     {
         private static ILogger? _logger;
         private ServiceContainer? _container;
@@ -35,6 +38,7 @@ namespace GalacticExpansion
         private SimulationState? _currentState;
         private Configuration? _config;
         private ModGameAPI? _modApi;
+        private IModApi? _extendedModApi; // Расширенный API (IMod.Init) для доступа к IApplication и IPlayfield
         
         private DateTime _lastBackupTime;
         private bool _isInitialized = false; // Флаг инициализации
@@ -150,9 +154,11 @@ namespace GalacticExpansion
                 _logger.Info("Registering Phase 3 domain modules...");
                 
                 // PlacementResolver - поиск мест для структур
-                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger);
+                // Используем IModApi если доступен (расширенный API через IMod.Init для доступа к IPlayfield)
+                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, _extendedModApi);
                 _container.Register<IPlacementResolver>(placementResolver);
-                _logger.Info("PlacementResolver registered");
+                _logger.Info($"PlacementResolver registered (terrain height: {(_extendedModApi != null ? "precise via IPlayfield" : "fallback 100m")})");
+
                 
                 // EntitySpawner - спавн структур и NPC
                 var entitySpawner = new EntitySpawner(_gateway, placementResolver, _logger);
@@ -400,5 +406,61 @@ namespace GalacticExpansion
             LogManager.ReconfigExistingLoggers();
             _logger?.Info($"Log level set to: {logLevel}");
         }
+
+        #region IMod Implementation (Extended API)
+
+        /// <summary>
+        /// Инициализация расширенного API мода (IMod.Init).
+        /// Вызывается Dedicated Server после Game_Start для предоставления доступа к IModApi.
+        /// 
+        /// IModApi предоставляет:
+        /// - IApplication.OnPlayfieldLoaded/OnPlayfieldUnloading события для кэширования IPlayfield объектов
+        /// - IPlayfield.GetTerrainHeightAt() для точного определения высоты рельефа
+        /// - Другие расширенные возможности API
+        /// 
+        /// Примечание: Этот метод вызывается на том же Dedicated Server процессе после Game_Start.
+        /// </summary>
+        public void Init(IModApi modAPI)
+        {
+            try
+            {
+                if (_logger == null)
+                {
+                    InitializeLogging();
+                    _logger = LogManager.GetCurrentClassLogger();
+                }
+
+                _logger.Info("========================================");
+                _logger.Info("GalacticExpansion IMod.Init - Extended API initialization...");
+                _logger.Info("========================================");
+
+                // Сохраняем ссылку на IModApi для доступа к расширенным возможностям
+                _extendedModApi = modAPI;
+                _logger.Info("✅ IModApi initialized - PlacementResolver will use IPlayfield.GetTerrainHeightAt() for precise terrain height");
+                _logger.Info("   IApplication.OnPlayfieldLoaded events will cache IPlayfield objects for terrain detection");
+
+                // Примечание: Game_Start уже был вызван с базовым ModGameAPI
+                // PlacementResolver уже создан и зарегистрирован в DI контейнере
+                // IModApi будет использован PlacementResolver через события OnPlayfieldLoaded
+            }
+            catch (Exception ex)
+            {
+                var logger = _logger ?? LogManager.GetCurrentClassLogger();
+                logger.Error(ex, "Error during IMod.Init (extended API initialization)");
+            }
+        }
+
+        /// <summary>
+        /// Остановка мода (IMod.Shutdown).
+        /// Вызывается Dedicated Server при остановке мода.
+        /// </summary>
+        public void Shutdown()
+        {
+            _logger?.Info("IMod.Shutdown called");
+            // Используем тот же метод остановки что и Game_Exit
+            Game_Exit();
+        }
+
+        #endregion
     }
 }

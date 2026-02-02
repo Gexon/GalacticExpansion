@@ -5,4 +5,4 @@ Version: 1.0.0-alpha1
 Website: https://github.com/Gexon/GalacticExpansion
 
 # Mod works on dedicated server and playfield server
-ModTargets: Dedi, PfServer
+ModTargets: Dedi

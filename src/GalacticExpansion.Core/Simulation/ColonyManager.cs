@@ -89,6 +89,9 @@ namespace GalacticExpansion.Core.Simulation
         /// <summary>
         /// Удаляет колонию
         /// </summary>
+        /// <summary>
+        /// Удаляет колонию из системы
+        /// </summary>
         public async Task RemoveColonyAsync(string colonyId)
         {
             var state = await _stateStore.LoadAsync();
@@ -96,11 +99,17 @@ namespace GalacticExpansion.Core.Simulation
 
             if (colony != null)
             {
+                // Удаляем колонию из списка
                 state.Colonies.Remove(colony);
-                var stateToSave = await _stateStore.LoadAsync();
-                await _stateStore.SaveAsync(stateToSave);
+                
+                // Сохраняем измененный state (не загружаем заново!)
+                await _stateStore.SaveAsync(state);
 
-                _logger.Info($"Colony {colonyId} removed");
+                _logger.Info($"Colony {colonyId} removed from state");
+            }
+            else
+            {
+                _logger.Warn($"Colony {colonyId} not found in state");
             }
         }
 

@@ -25,8 +25,6 @@ namespace GalacticExpansion.Tests.Unit.Placement
     {
         private readonly Mock<IEmpyrionGateway> _gatewayMock;
         private readonly Mock<IPlayerTracker> _playerTrackerMock;
-        private readonly Mock<IApplication> _applicationMock;
-        private readonly Mock<IPlayfield> _playfieldMock;
         private readonly Mock<ILogger> _loggerMock;
         private readonly PlacementResolver _resolver;
 
@@ -34,22 +32,13 @@ namespace GalacticExpansion.Tests.Unit.Placement
         {
             _gatewayMock = new Mock<IEmpyrionGateway>();
             _playerTrackerMock = new Mock<IPlayerTracker>();
-            _applicationMock = new Mock<IApplication>();
-            _playfieldMock = new Mock<IPlayfield>();
             _loggerMock = new Mock<ILogger>();
-
-            // По умолчанию playfield доступен
-            _applicationMock.Setup(a => a.GetPlayfield(It.IsAny<string>())).Returns(_playfieldMock.Object);
-
-            // По умолчанию высота рельефа = 100м
-            _playfieldMock.Setup(p => p.GetTerrainHeightAt(It.IsAny<float>(), It.IsAny<float>())).Returns(100f);
 
             // По умолчанию нет структур
             _gatewayMock
                 .Setup(g => g.SendRequestAsync<Dictionary<string, List<GlobalStructureInfo>>>(
                     CmdId.Request_GlobalStructure_List,
                     null,
-                    It.IsAny<int>(),
                     It.IsAny<int>()))
                 .ReturnsAsync(new Dictionary<string, List<GlobalStructureInfo>>
                 {
@@ -60,17 +49,16 @@ namespace GalacticExpansion.Tests.Unit.Placement
             _playerTrackerMock.Setup(pt => pt.GetPlayersOnPlayfield(It.IsAny<string>()))
                 .Returns(new List<TrackedPlayerInfo>());
 
-            _resolver = new PlacementResolver(_gatewayMock.Object, _playerTrackerMock.Object, _applicationMock.Object, _loggerMock.Object);
+            _resolver = new PlacementResolver(_gatewayMock.Object, _playerTrackerMock.Object, _loggerMock.Object);
         }
 
         [Fact(DisplayName = "Конструктор - выбрасывает ArgumentNullException при null параметрах")]
         public void Constructor_ThrowsArgumentNullException_WhenParametersAreNull()
         {
             // Assert
-            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(null!, _playerTrackerMock.Object, _applicationMock.Object, _loggerMock.Object));
-            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(_gatewayMock.Object, null!, _applicationMock.Object, _loggerMock.Object));
-            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(_gatewayMock.Object, _playerTrackerMock.Object, null!, _loggerMock.Object));
-            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(_gatewayMock.Object, _playerTrackerMock.Object, _applicationMock.Object, null!));
+            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(null!, _playerTrackerMock.Object, _loggerMock.Object));
+            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(_gatewayMock.Object, null!, _loggerMock.Object));
+            Assert.Throws<ArgumentNullException>(() => new PlacementResolver(_gatewayMock.Object, _playerTrackerMock.Object, null!));
         }
 
         [Fact(DisplayName = "FindSuitableLocationAsync - находит место когда нет препятствий")]
@@ -295,10 +283,11 @@ namespace GalacticExpansion.Tests.Unit.Placement
         public void GetTerrainHeight_ReturnsCorrectHeight()
         {
             // Arrange
-            _playfieldMock.Setup(p => p.GetTerrainHeightAt(100f, 200f)).Returns(123.45f);
+            var mockPlayfield = new Mock<IPlayfield>();
+            mockPlayfield.Setup(p => p.GetTerrainHeightAt(100f, 200f)).Returns(123.45f);
 
             // Act
-            var height = _resolver.GetTerrainHeight(_playfieldMock.Object, 100f, 200f);
+            var height = _resolver.GetTerrainHeight(mockPlayfield.Object, 100f, 200f);
 
             // Assert
             Assert.Equal(123.45f, height);
@@ -311,18 +300,15 @@ namespace GalacticExpansion.Tests.Unit.Placement
             Assert.Throws<ArgumentNullException>(() => _resolver.GetTerrainHeight(null!, 0, 0));
         }
 
-        [Fact(DisplayName = "FindLocationAtTerrainAsync - возвращает позицию с корректной высотой")]
-        public async Task FindLocationAtTerrainAsync_ReturnsPositionWithCorrectHeight()
+        [Fact(DisplayName = "FindLocationAtTerrainAsync - возвращает позицию с дефолтной высотой")]
+        public async Task FindLocationAtTerrainAsync_ReturnsPositionWithDefaultHeight()
         {
-            // Arrange
-            _playfieldMock.Setup(p => p.GetTerrainHeightAt(500f, -300f)).Returns(85f);
-
             // Act
             var position = await _resolver.FindLocationAtTerrainAsync("Akua", 500f, -300f, heightOffset: 2.0f);
 
             // Assert
             Assert.Equal(500f, position.X);
-            Assert.Equal(87f, position.Y); // 85 (terrain) + 2 (offset)
+            Assert.Equal(102f, position.Y); // 100 (default) + 2 (offset)
             Assert.Equal(-300f, position.Z);
         }
 
@@ -333,20 +319,6 @@ namespace GalacticExpansion.Tests.Unit.Placement
             await Assert.ThrowsAsync<ArgumentException>(
                 () => _resolver.FindLocationAtTerrainAsync("", 0, 0)
             );
-        }
-
-        [Fact(DisplayName = "FindLocationAtTerrainAsync - выбрасывает ArgumentException когда playfield не найден")]
-        public async Task FindLocationAtTerrainAsync_ThrowsArgumentException_WhenPlayfieldNotFound()
-        {
-            // Arrange
-            _applicationMock.Setup(a => a.GetPlayfield("NonExistent")).Returns((IPlayfield?)null);
-
-            // Act & Assert
-            var exception = await Assert.ThrowsAsync<ArgumentException>(
-                () => _resolver.FindLocationAtTerrainAsync("NonExistent", 0, 0)
-            );
-
-            Assert.Contains("not found", exception.Message.ToLower());
         }
 
         [Fact(DisplayName = "IsLocationSuitableAsync - возвращает true для подходящей позиции")]
