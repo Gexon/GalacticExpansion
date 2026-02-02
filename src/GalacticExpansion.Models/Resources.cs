@@ -25,6 +25,13 @@ namespace GalacticExpansion.Models
         public float ProductionRate { get; set; }
 
         /// <summary>
+        /// Бонус производства от аванпостов (в процентах).
+        /// Каждый аванпост добавляет +20%.
+        /// </summary>
+        [JsonProperty("ProductionBonus")]
+        public float ProductionBonus { get; set; }
+
+        /// <summary>
         /// Конструктор по умолчанию
         /// </summary>
         public Resources()

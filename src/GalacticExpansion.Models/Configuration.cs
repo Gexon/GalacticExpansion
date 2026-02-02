@@ -76,6 +76,12 @@ namespace GalacticExpansion.Models
         /// </summary>
         [JsonProperty("Expansion")]
         public ExpansionSettings Expansion { get; set; } = new ExpansionSettings();
+
+        /// <summary>
+        /// Настройки юнит-экономики
+        /// </summary>
+        [JsonProperty("UnitEconomy")]
+        public UnitEconomySettings UnitEconomy { get; set; } = new UnitEconomySettings();
     }
 
     /// <summary>
@@ -267,6 +273,12 @@ namespace GalacticExpansion.Models
         /// </summary>
         [JsonProperty("MinTimeSeconds")]
         public int MinTimeSeconds { get; set; }
+
+        /// <summary>
+        /// Количество охранников для спавна на этой стадии
+        /// </summary>
+        [JsonProperty("GuardCount")]
+        public int GuardCount { get; set; }
     }
 
     /// <summary>
@@ -435,5 +447,42 @@ namespace GalacticExpansion.Models
         /// </summary>
         [JsonProperty("MinTimeSinceMaxStageMinutes")]
         public int MinTimeSinceMaxStageMinutes { get; set; } = 120;
+    }
+
+    /// <summary>
+    /// Настройки юнит-экономики
+    /// </summary>
+    [JsonObject(MemberSerialization.OptIn)]
+    public class UnitEconomySettings
+    {
+        /// <summary>
+        /// Включить систему юнит-экономики
+        /// </summary>
+        [JsonProperty("Enabled")]
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Бонус производства от ресурсного аванпоста (коэффициент)
+        /// </summary>
+        [JsonProperty("ResourceOutpostBonus")]
+        public float ResourceOutpostBonus { get; set; } = 0.25f;
+
+        /// <summary>
+        /// Бонус производства от верфи (коэффициент)
+        /// </summary>
+        [JsonProperty("ShipyardBonus")]
+        public float ShipyardBonus { get; set; } = 0.5f;
+
+        /// <summary>
+        /// Бонус производства от дронбазы (коэффициент)
+        /// </summary>
+        [JsonProperty("DroneBaseBonus")]
+        public float DroneBaseBonus { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Штраф производства при атаке (коэффициент)
+        /// </summary>
+        [JsonProperty("UnderAttackPenalty")]
+        public float UnderAttackPenalty { get; set; } = -0.3f;
     }
 }

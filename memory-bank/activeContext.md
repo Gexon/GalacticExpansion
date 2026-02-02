@@ -2,12 +2,91 @@
 
 ## Текущее состояние проекта
 
-**Дата обновления:** 01.02.2026  
-**Фаза:** Phase 2 Core COMPLETED! ✅ Все тесты проходят (91/91 - 100%), готов к деплою на dedicated server
+**Дата обновления:** 02.02.2026  
+**Фаза:** Phase 3 Domain ЧАСТИЧНО РЕАЛИЗОВАНА! ⚠️ Код скомпилирован, но тесты Phase 3 не работают полностью (91/91 старых + ~20 новых с ошибками компиляции)
 
 ---
 
 ## Недавние изменения
+
+### 02.02.2026 — ЧАСТИЧНАЯ РЕАЛИЗАЦИЯ Phase 3: Код компилируется, тесты требуют доработки
+
+**Реализовано:**
+- ✅ **PlacementResolver** — модуль поиска подходящих мест для структур (спиральный алгоритм, проверка дистанций)
+  - ⚠️ Временное решение: фиксированная высота 100м (TODO: интеграция IPlayfield.GetTerrainHeightAt)
+  - ✅ Проверка дистанций от игроков и структур
+  - ✅ Защита от бесконечных циклов (timeout)
+  
+- ✅ **EntitySpawner** — модуль создания и удаления игровых сущностей
+  - ✅ SpawnStructureAsync с retry логикой
+  - ✅ SpawnStructureAtTerrainAsync с определением высоты
+  - ✅ SpawnNPCGroupAsync с размещением по кругу
+  - ✅ DestroyEntityAsync и DestroyEntitiesAsync
+  - ✅ EntityExistsAsync для проверки
+  
+- ✅ **EconomySimulator** — виртуальная экономика колоний
+  - ✅ UpdateProduction с формулой: resources += ProductionRate × (1 + Bonus/100) × deltaTime
+  - ✅ AddResourceNode/RemoveResourceNode (бонус +20% за аванпост)
+  - ✅ HasEnoughResourcesForUpgrade, ConsumeResourcesForUpgrade
+  - ✅ GetTimeUntilNextUpgradeSeconds
+  
+- ✅ **UnitEconomyManager** — производство и учёт боевых юнитов
+  - ✅ ProduceUnits с накопительным прогрессом
+  - ✅ CanSpawnUnit, ReserveUnits
+  - ✅ RegisterActiveUnit, RecordUnitLoss
+  - ✅ RecalculateCapacity при смене стадии
+  - ✅ OnResourceOutpostDestroyed, OnShipyardDestroyed
+  
+- ✅ **StageManager** — управление жизненным циклом колоний
+  - ✅ TransitionToNextStageAsync (удаление старой структуры → спавн новой → обновление state)
+  - ✅ CanTransitionToNextStageAsync с проверкой ресурсов и времени
+  - ✅ InitializeColonyAsync для создания новых колоний
+  - ✅ DowngradeColonyAsync при разрушении главной базы
+  - ✅ MaintainColonyStructuresAsync с защитой от decay (Request_Structure_Touch)
+  - ✅ События StageTransitionEvent
+  
+- ✅ **ColonyManager** — координатор всех модулей Phase 3
+  - ✅ UpdateColonyAsync (экономика + производство + проверка апгрейдов)
+  - ✅ CreateColonyAsync
+  - ✅ RemoveColonyAsync
+
+**Исправлено 61 ошибку компиляции:**
+- ✅ NLog вызовы: LogInformation → Info, LogWarning → Warn, LogError → Error
+- ✅ Vector3.Zero → new Vector3() (кастомный Vector3 не имеет статического Zero)
+- ✅ IdStructure → Id (правильный тип для ModAPI)
+- ✅ EntityType приведение к byte: (byte)entityType
+- ✅ ColonyStage nullable: убраны .HasValue/.Value, используется прямое сравнение
+- ✅ IStateStore.SaveAsync: требует SimulationState аргумент
+- ✅ IEventBus.PublishAsync → Publish (синхронный метод)
+- ✅ IApplication удалён из PlacementResolver (GetPlayfield не существует)
+- ✅ Параметры методов выровнены с интерфейсами
+- ✅ ColonyManager НЕ является ISimulationModule (только координатор)
+
+**Зарегистрировано в DI (ModMain.cs):**
+- ✅ PlacementResolver
+- ✅ EntitySpawner
+- ✅ EconomySimulator
+- ✅ UnitEconomyManager
+- ✅ StageManager
+- ✅ ColonyManager
+
+**Сборка проекта:**
+- ✅ Проект скомпилирован успешно (0 ошибок)
+- ✅ Все 5 DLL собраны
+
+**Тестирование:**
+- ✅ **Integration-тесты Phase 2:** 6/6 проходят (100%)
+- ✅ **Unit-тесты Phase 1-2:** 85/85 проходят (100%)
+- ❌ **Unit-тесты Phase 3:** НЕ РАБОТАЮТ (файлы были в неправильной папке, после переноса требуют исправления)
+  - ❌ PlacementResolverTests — 6 тестов написаны, но с ошибками (PlacementCriteria.Center не существует)
+  - ❌ EntitySpawnerTests — 6 тестов написаны и компилируются ✅
+  - ❌ EconomySimulatorTests — 8 тестов написаны и компилируются ✅  
+  - ❌ UnitEconomyManagerTests — 7 тестов написаны, но есть 2 ошибки компиляции
+  - ❌ StageManagerTests — НЕ НАПИСАНЫ (0 тестов)
+  - ❌ ColonyManagerTests — НЕ НАПИСАНЫ (0 тестов)
+  - ❌ Integration-тесты Phase 3 (Colony Lifecycle, Economy, Unit Economy) — НЕ НАПИСАНЫ
+
+**Текущее состояние тестов:** 91/91 (100%) — только старые тесты Phase 1-2
 
 ### 01.02.2026 — ФИНАЛИЗАЦИЯ Phase 2: Все тесты проходят!
 
@@ -281,6 +360,45 @@ BaseL2: 3.5/час + 2 аванпоста + верфь = 3.5 × 1.5 × 1.5 = 7.8
 ---
 
 ## Следующие шаги
+
+### ⚠️ Phase 3: Domain ЧАСТИЧНО РЕАЛИЗОВАНА → Требуется доработка тестов
+
+**Код модулей Phase 3:** ✅ РЕАЛИЗОВАН и скомпилирован (0 ошибок компиляции)
+
+**Тесты Phase 3:** ❌ ТРЕБУЮТ ИСПРАВЛЕНИЯ
+
+**Что нужно сделать для завершения Phase 3:**
+
+1. **Исправить тесты Phase 3:**
+   - ❌ PlacementResolverTests (6 тестов) — проблемы с PlacementCriteria.Center (свойство не существует, используется PreferredLocation)
+   - ⚠️ EntitySpawnerTests (6 тестов) — компилируются ✅
+   - ⚠️ EconomySimulatorTests (8 тестов) — компилируются ✅
+   - ❌ UnitEconomyManagerTests (7 тестов) — 2 ошибки компиляции на строке 95
+   - ❌ StageManagerTests — НЕ НАПИСАНЫ (требуется ~10-15 тестов)
+   - ❌ ColonyManagerTests — НЕ НАПИСАНЫ (требуется ~8-10 тестов)
+
+2. **Написать integration-тесты Phase 3:**
+   - ❌ Colony Lifecycle Integration Tests — НЕ НАПИСАНЫ
+     - Создание колонии → апгрейд через стадии → экспансия
+     - Разрушение главной базы → downgrade
+     - Добавление/удаление аванпостов
+   - ❌ Economy Integration Tests — НЕ НАПИСАНЫ
+     - Производство ресурсов с бонусами от аванпостов
+     - Накопление и потребление ресурсов для апгрейдов
+   - ❌ Unit Economy Integration Tests — НЕ НАПИСАНЫ
+     - Производство юнитов с течением времени
+     - Резервирование и спавн юнитов
+     - Влияние разрушений на производство
+
+3. **Запустить все тесты:**
+   - После исправления — запустить `dotnet test` и убедиться что **все** тесты проходят
+   - Ожидаемое количество: ~110-120 тестов (91 старых + ~20-30 новых)
+
+4. **Деплой и тестирование на dedicated server:**
+   - Release сборка
+   - Запуск на сервере
+   - Проверка работы новых модулей
+   - Мониторинг логов и производительности
 
 ### ✅ Phase 2: Core COMPLETED (100% тестов) → Phase 2.5: First Testing
 

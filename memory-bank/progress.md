@@ -263,37 +263,66 @@ ProductionRate = BaseRate × (1 + OutpostCount × 0.25) ×
 
 ---
 
-### Phase 3: Domain (Недели 5-7) — NOT STARTED
+### Phase 3: Domain (Недели 5-7) — ЧАСТИЧНО РЕАЛИЗОВАНА ⚠️
+
+**Дата:** 02.02.2026  
+**Статус:** Код скомпилирован (✅), тесты требуют доработки (❌)
 
 **Spawning & Evolution:**
-- [ ] Entity Spawner (структуры)
-- [ ] NPC Spawner
-- [ ] Entity Destroyer
-- [ ] Stage Manager (FSM)
-- [ ] Prefab Registry
-- [ ] Логика переходов стадий
+- ✅ Entity Spawner (структуры) — реализован с retry логикой
+- ✅ NPC Spawner — SpawnNPCGroupAsync с круговым размещением
+- ✅ Entity Destroyer — DestroyEntityAsync, DestroyEntitiesAsync
+- ✅ Stage Manager (FSM) — полный lifecycle: init → upgrade → downgrade
+- ⚠️ Prefab Registry — используется через конфигурацию
+- ✅ Логика переходов стадий — TransitionToNextStageAsync, CanTransitionToNextStageAsync
 
 **Placement Resolver:**
-- [ ] Алгоритм спирального поиска
-- [ ] Проверки дистанций
-- [ ] Эвристика высоты
-- [ ] Unit-тесты алгоритма
+- ✅ Алгоритм спирального поиска — реализован
+- ✅ Проверки дистанций — от игроков и структур
+- ⚠️ Эвристика высоты — временно фиксированная 100м (TODO: IPlayfield.GetTerrainHeightAt)
+- ❌ Unit-тесты алгоритма — 6 тестов написаны, но требуют исправления PlacementCriteria
 
 **Economy Sim:**
-- [ ] Система виртуальных ресурсов
-- [ ] Расчет производства
-- [ ] Resource Nodes
-- [ ] Спавн аванпостов
+- ✅ Система виртуальных ресурсов — Resources.VirtualResources
+- ✅ Расчет производства — формула с бонусами от аванпостов
+- ✅ Resource Nodes — AddResourceNode, RemoveResourceNode
+- ⚠️ Спавн аванпостов — логика есть, но не полностью протестирована
 
 **Unit Economy Manager:**
-- [ ] UnitPool модели данных
-- [ ] Производство юнитов (ProduceUnits)
-- [ ] Резервирование и регистрация (ReserveUnits, RegisterActiveUnit)
-- [ ] Расчет ProductionRate с модификаторами
-- [ ] Учет потерь (RecordUnitLoss)
-- [ ] Обработка разрушений (аванпосты, верфь, дронбаза)
-- [ ] Пересчет вместимости при смене стадии
-- [ ] Интеграция с Threat Director
+- ✅ UnitPool модели данных — AvailableGuards, ActiveUnits, ProductionRate
+- ✅ Производство юнитов (ProduceUnits) — с накопительным прогрессом
+- ✅ Резервирование и регистрация (ReserveUnits, RegisterActiveUnit)
+- ✅ Расчет ProductionRate с модификаторами — бонусы от аванпостов, верфи, дронбазы
+- ✅ Учет потерь (RecordUnitLoss)
+- ✅ Обработка разрушений (аванпосты, верфь, дронбаза) — OnResourceOutpostDestroyed, OnShipyardDestroyed
+- ✅ Пересчет вместимости при смене стадии — RecalculateCapacity
+- ⚠️ Интеграция с Threat Director — код готов, но не протестирован
+
+**Colony Manager:**
+- ✅ UpdateColonyAsync — координация всех модулей
+- ✅ CreateColonyAsync — создание через StageManager
+- ✅ RemoveColonyAsync — удаление с очисткой state
+
+**Тестирование Phase 3:**
+- ❌ PlacementResolverTests — 6 тестов с ошибками (Center → PreferredLocation)
+- ⚠️ EntitySpawnerTests — 6 тестов, компилируются, но не запускались
+- ⚠️ EconomySimulatorTests — 8 тестов, компилируются, но не запускались
+- ❌ UnitEconomyManagerTests — 7 тестов с 2 ошибками компиляции
+- ❌ StageManagerTests — НЕ НАПИСАНЫ (0 тестов из ~10-15 запланированных)
+- ❌ ColonyManagerTests — НЕ НАПИСАНЫ (0 тестов из ~8-10 запланированных)
+- ❌ Integration-тесты Phase 3 — НЕ НАПИСАНЫ
+
+**Исправленные ошибки компиляции (61 шт.):**
+1. NLog методы (LogInformation → Info, LogWarning → Warn) — ~25 мест
+2. Vector3.Zero → new Vector3() — ~10 мест
+3. IdStructure → Id — ~5 мест
+4. EntityType casting к byte — 2 места
+5. ColonyStage nullable (.HasValue/.Value убраны) — ~8 мест
+6. IStateStore.SaveAsync требует SimulationState — ~6 мест
+7. IEventBus.PublishAsync → Publish — ~3 места
+8. IApplication удалён из PlacementResolver — 1 место
+9. ColonyManager не ISimulationModule — 1 место
+10. Множественные сигнатуры методов выровнены с интерфейсами
 
 ---
 

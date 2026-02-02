@@ -1,8 +1,11 @@
 using System;
 using System.Threading.Tasks;
 using Eleon.Modding;
+using GalacticExpansion.Core.Economy;
 using GalacticExpansion.Core.Gateway;
+using GalacticExpansion.Core.Placement;
 using GalacticExpansion.Core.Simulation;
+using GalacticExpansion.Core.Spawning;
 using GalacticExpansion.Core.State;
 using GalacticExpansion.Core.Tracking;
 using GalacticExpansion.DependencyInjection;
@@ -142,6 +145,56 @@ namespace GalacticExpansion
                 _simulationEngine.RegisterModule(structureTracker);
                 _container.Register<IStructureTracker>(structureTracker);
                 _logger.Info("StructureTracker registered");
+                
+                // Регистрируем Phase 3 Domain модули
+                _logger.Info("Registering Phase 3 domain modules...");
+                
+                // PlacementResolver - поиск мест для структур
+                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger);
+                _container.Register<IPlacementResolver>(placementResolver);
+                _logger.Info("PlacementResolver registered");
+                
+                // EntitySpawner - спавн структур и NPC
+                var entitySpawner = new EntitySpawner(_gateway, placementResolver, _logger);
+                _container.Register<IEntitySpawner>(entitySpawner);
+                _logger.Info("EntitySpawner registered");
+                
+                // EconomySimulator - виртуальная экономика
+                var economySimulator = new EconomySimulator(_config, _logger);
+                _container.Register<IEconomySimulator>(economySimulator);
+                _logger.Info("EconomySimulator registered");
+                
+                // UnitEconomyManager - управление юнитами
+                var unitEconomyManager = new UnitEconomyManager(_config, _logger);
+                _container.Register<IUnitEconomyManager>(unitEconomyManager);
+                _logger.Info("UnitEconomyManager registered");
+                
+                // StageManager - управление стадиями колоний
+                var stageManager = new StageManager(
+                    _gateway,
+                    entitySpawner,
+                    placementResolver,
+                    economySimulator,
+                    unitEconomyManager,
+                    _stateStore,
+                    eventBus,
+                    _config,
+                    _logger
+                );
+                _container.Register<IStageManager>(stageManager);
+                _logger.Info("StageManager registered");
+                
+                // ColonyManager - координация модулей
+                var colonyManager = new ColonyManager(
+                    stageManager,
+                    economySimulator,
+                    unitEconomyManager,
+                    _stateStore,
+                    _logger
+                );
+                // ColonyManager не является модулем симуляции, только координатором
+                _container.Register<IColonyManager>(colonyManager);
+                _logger.Info("ColonyManager registered");
                 
                 // 9. Запускаем симуляцию
                 _logger.Info("Starting simulation engine...");
