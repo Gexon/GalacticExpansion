@@ -278,11 +278,11 @@ namespace GalacticExpansion.Tests.Unit.Placement
         public void GetTerrainHeight_ReturnsCorrectHeight()
         {
             // Arrange
-            var mockPlayfield = new Mock<IPlayfield>();
-            mockPlayfield.Setup(p => p.GetTerrainHeightAt(100f, 200f)).Returns(123.45f);
+            var mockPlayfieldWrapper = new Mock<IPlayfieldWrapper>();
+            mockPlayfieldWrapper.Setup(p => p.GetTerrainHeight(100f, 200f)).Returns(123.45f);
 
             // Act
-            var height = _resolver.GetTerrainHeight(mockPlayfield.Object, 100f, 200f);
+            var height = _resolver.GetTerrainHeight(mockPlayfieldWrapper.Object, 100f, 200f);
 
             // Assert
             Assert.Equal(123.45f, height);

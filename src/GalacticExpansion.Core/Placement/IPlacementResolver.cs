@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using Eleon.Modding;
+using GalacticExpansion.Core.Gateway;
 using GalacticExpansion.Models;
 
 namespace GalacticExpansion.Core.Placement
@@ -33,11 +34,11 @@ namespace GalacticExpansion.Core.Placement
         /// Точно определяет высоту рельефа на планете (API v1.15+).
         /// Решает проблему спавна структур под землей или в воздухе.
         /// </summary>
-        /// <param name="playfield">Интерфейс playfield из ModAPI</param>
+        /// <param name="playfieldWrapper">Wrapper для доступа к playfield (изолирует зависимость от Unity)</param>
         /// <param name="x">X координата</param>
         /// <param name="z">Z координата</param>
         /// <returns>Высота поверхности земли в метрах</returns>
-        float GetTerrainHeight(IPlayfield playfield, float x, float z);
+        float GetTerrainHeight(IPlayfieldWrapper playfieldWrapper, float x, float z);
 
         /// <summary>
         /// Находит позицию на рельефе с указанным смещением по высоте.

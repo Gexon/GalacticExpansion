@@ -111,15 +111,15 @@ namespace GalacticExpansion.Tests.Unit.Economy
             // Arrange
             var colony = new Colony
             {
-                Stage = ColonyStage.ConstructionYard,
-                Resources = new Resources { VirtualResources = 1500 }
+                Stage = ColonyStage.ConstructionYard, // Следующая стадия: BaseL1, требуется 1000 ресурсов
+                Resources = new Resources { VirtualResources = 1500 } // Есть 1500 (достаточно для BaseL1)
             };
 
             // Act
             var result = _simulator.HasEnoughResourcesForUpgrade(colony);
 
             // Assert
-            Assert.True(result);
+            Assert.True(result, "Should return true when resources (1500) >= required for BaseL1 (1000)");
         }
 
         [Fact(DisplayName = "HasEnoughResourcesForUpgrade - возвращает false когда недостаточно")]

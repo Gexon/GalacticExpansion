@@ -25,7 +25,7 @@ namespace GalacticExpansion.Core.Placement
         private readonly IEmpyrionGateway _gateway;
         private readonly IPlayerTracker _playerTracker;
         private readonly ILogger _logger;
-        private readonly Dictionary<string, IPlayfield> _playfieldCache;
+        private readonly Dictionary<string, IPlayfieldWrapper> _playfieldCache;
         private const float DefaultStepSize = 50f;
         private const float DefaultTerrainHeight = 100f; // Высота по умолчанию для fallback
 
@@ -45,7 +45,7 @@ namespace GalacticExpansion.Core.Placement
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _playerTracker = playerTracker ?? throw new ArgumentNullException(nameof(playerTracker));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _playfieldCache = new Dictionary<string, IPlayfield>();
+            _playfieldCache = new Dictionary<string, IPlayfieldWrapper>();
 
             // Если доступен IModApi (расширенный API через IMod.Init), подписываемся на события playfield'ов
             if (modApi != null && modApi.Application != null)
@@ -56,7 +56,7 @@ namespace GalacticExpansion.Core.Placement
                 {
                     if (playfield != null)
                     {
-                        _playfieldCache[playfield.Name] = playfield;
+                        _playfieldCache[playfield.Name] = new PlayfieldWrapper(playfield);
                         _logger.Debug($"Cached playfield: {playfield.Name}");
                     }
                 };
@@ -217,14 +217,14 @@ namespace GalacticExpansion.Core.Placement
             return true;
         }
 
-        public float GetTerrainHeight(IPlayfield playfield, float x, float z)
+        public float GetTerrainHeight(IPlayfieldWrapper playfieldWrapper, float x, float z)
         {
-            if (playfield == null)
-                throw new ArgumentNullException(nameof(playfield));
+            if (playfieldWrapper == null)
+                throw new ArgumentNullException(nameof(playfieldWrapper));
 
             try
             {
-                return playfield.GetTerrainHeightAt(x, z);
+                return playfieldWrapper.GetTerrainHeight(x, z);
             }
             catch (Exception ex)
             {

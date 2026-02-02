@@ -340,5 +340,212 @@ namespace GalacticExpansion.Tests.Integration
             // Юниты частично произведены
             Assert.True(colony.UnitPool.ProductionProgress > 0 || colony.UnitPool.AvailableGuards > 0);
         }
+
+        [Fact(DisplayName = "Integration: StageManager - переход через все стадии")]
+        public async Task StageManager_FullLifecycle_ThroughAllStages()
+        {
+            // Arrange
+            var placementResolverMock = new Mock<IPlacementResolver>();
+            placementResolverMock.Setup(pr => pr.FindLocationAtTerrainAsync(
+                It.IsAny<string>(), It.IsAny<float>(), It.IsAny<float>(), It.IsAny<float>()))
+                .ReturnsAsync(new Vector3(1000, 100, -500));
+
+            var entitySpawner = new EntitySpawner(_gatewayMock.Object, placementResolverMock.Object, _loggerMock.Object);
+            var economySimulator = new EconomySimulator(_config, _loggerMock.Object);
+            var unitEconomy = new UnitEconomyManager(_config, _loggerMock.Object);
+
+            var stageManager = new StageManager(
+                _gatewayMock.Object,
+                entitySpawner,
+                placementResolverMock.Object,
+                economySimulator,
+                unitEconomy,
+                _stateStoreMock.Object,
+                _eventBusMock.Object,
+                _config,
+                _loggerMock.Object
+            );
+
+            // Act - инициализация колонии
+            var colony = await stageManager.InitializeColonyAsync("Akua", new Vector3(1000, 0, -500), 2);
+
+            // Assert - колония создана на начальной стадии
+            Assert.Equal(ColonyStage.LandingPending, colony.Stage);
+            Assert.NotNull(colony.MainStructureId);
+
+            // Переходы через стадии (симуляция накопления ресурсов)
+            colony.Resources.VirtualResources = 1000;
+            colony.LastUpgradeTime = DateTime.UtcNow.AddSeconds(-200);
+            await stageManager.TransitionToNextStageAsync(colony);
+            Assert.Equal(ColonyStage.ConstructionYard, colony.Stage);
+
+            colony.Resources.VirtualResources = 3000;
+            colony.LastUpgradeTime = DateTime.UtcNow.AddSeconds(-400);
+            await stageManager.TransitionToNextStageAsync(colony);
+            Assert.Equal(ColonyStage.BaseL1, colony.Stage);
+
+            colony.Resources.VirtualResources = 10000;
+            colony.LastUpgradeTime = DateTime.UtcNow.AddSeconds(-700);
+            await stageManager.TransitionToNextStageAsync(colony);
+            Assert.Equal(ColonyStage.BaseL2, colony.Stage);
+        }
+
+        [Fact(DisplayName = "Integration: Downgrade при разрушении базы")]
+        public async Task StageManager_DowngradesCorrectly_WhenBaseDestroyed()
+        {
+            // Arrange
+            var placementResolverMock = new Mock<IPlacementResolver>();
+            placementResolverMock.Setup(pr => pr.FindSuitableLocationAsync(It.IsAny<PlacementCriteria>()))
+                .ReturnsAsync(new Vector3(1000, 100, -500));
+
+            var entitySpawner = new EntitySpawner(_gatewayMock.Object, placementResolverMock.Object, _loggerMock.Object);
+            var economySimulator = new EconomySimulator(_config, _loggerMock.Object);
+            var unitEconomy = new UnitEconomyManager(_config, _loggerMock.Object);
+
+            var stageManager = new StageManager(
+                _gatewayMock.Object,
+                entitySpawner,
+                placementResolverMock.Object,
+                economySimulator,
+                unitEconomy,
+                _stateStoreMock.Object,
+                _eventBusMock.Object,
+                _config,
+                _loggerMock.Object
+            );
+
+            var colony = new Colony("Akua", 2, new Vector3(1000, 0, -500))
+            {
+                Stage = ColonyStage.BaseL2,
+                MainStructureId = 500
+            };
+
+            // Act - разрушение базы приводит к downgrade
+            await stageManager.DowngradeColonyAsync(colony);
+
+            // Assert - откат на предыдущую стадию
+            Assert.Equal(ColonyStage.BaseL1, colony.Stage);
+            Assert.NotEqual(500, colony.MainStructureId); // Новая структура
+        }
+
+        [Fact(DisplayName = "Integration: Unit Economy - истощение резервов")]
+        public void UnitEconomy_ReservesDeplete_WhenUnitsSpawned()
+        {
+            // Arrange
+            var unitEconomy = new UnitEconomyManager(_config, _loggerMock.Object);
+            var colony = new Colony
+            {
+                Stage = ColonyStage.BaseL2,
+                UnitPool = new UnitPool
+                {
+                    MaxGuards = 10,
+                    AvailableGuards = 10
+                }
+            };
+
+            // Act - многократный спавн юнитов
+            for (int i = 0; i < 10; i++)
+            {
+                var reserved = unitEconomy.ReserveUnits(colony, UnitType.Guard, 1);
+                Assert.True(reserved, $"Should reserve unit #{i + 1}");
+            }
+
+            // Assert - резервы истощены
+            Assert.Equal(0, colony.UnitPool.AvailableGuards);
+            var cannotReserve = unitEconomy.ReserveUnits(colony, UnitType.Guard, 1);
+            Assert.False(cannotReserve, "Should not be able to reserve when depleted");
+        }
+
+        [Fact(DisplayName = "Integration: Economy + StageManager - блокировка апгрейда при нехватке ресурсов")]
+        public async Task EconomyAndStageManager_BlocksUpgrade_WhenInsufficientResources()
+        {
+            // Arrange
+            var economySimulator = new EconomySimulator(_config, _loggerMock.Object);
+            var unitEconomy = new UnitEconomyManager(_config, _loggerMock.Object);
+            var placementResolverMock = new Mock<IPlacementResolver>();
+            var entitySpawner = new EntitySpawner(_gatewayMock.Object, placementResolverMock.Object, _loggerMock.Object);
+
+            var stageManager = new StageManager(
+                _gatewayMock.Object,
+                entitySpawner,
+                placementResolverMock.Object,
+                economySimulator,
+                unitEconomy,
+                _stateStoreMock.Object,
+                _eventBusMock.Object,
+                _config,
+                _loggerMock.Object
+            );
+
+            var colony = new Colony
+            {
+                Stage = ColonyStage.ConstructionYard,
+                MainStructureId = 100,
+                Resources = new Resources { VirtualResources = 500 }, // Мало ресурсов (требуется 1000)
+                LastUpgradeTime = DateTime.UtcNow.AddSeconds(-200)
+            };
+
+            // Act
+            var canUpgrade = await stageManager.CanTransitionToNextStageAsync(colony);
+
+            // Assert
+            Assert.False(canUpgrade, "Should block upgrade when resources insufficient");
+        }
+
+        [Fact(DisplayName = "Integration: ColonyManager координирует все системы")]
+        public async Task ColonyManager_CoordinatesAllSystems_Correctly()
+        {
+            // Arrange
+            var placementResolverMock = new Mock<IPlacementResolver>();
+            placementResolverMock.Setup(pr => pr.FindLocationAtTerrainAsync(
+                It.IsAny<string>(), It.IsAny<float>(), It.IsAny<float>(), It.IsAny<float>()))
+                .ReturnsAsync(new Vector3(1000, 100, -500));
+
+            var entitySpawner = new EntitySpawner(_gatewayMock.Object, placementResolverMock.Object, _loggerMock.Object);
+            var economySimulator = new EconomySimulator(_config, _loggerMock.Object);
+            var unitEconomy = new UnitEconomyManager(_config, _loggerMock.Object);
+
+            var stageManager = new StageManager(
+                _gatewayMock.Object,
+                entitySpawner,
+                placementResolverMock.Object,
+                economySimulator,
+                unitEconomy,
+                _stateStoreMock.Object,
+                _eventBusMock.Object,
+                _config,
+                _loggerMock.Object
+            );
+
+            var colonyManager = new ColonyManager(
+                stageManager,
+                economySimulator,
+                unitEconomy,
+                _stateStoreMock.Object,
+                _loggerMock.Object
+            );
+
+            // Act - создание колонии
+            var colony = await colonyManager.CreateColonyAsync("Akua", new Vector3(1000, 0, -500), 2);
+
+            // Assert - колония создана через все системы
+            Assert.NotNull(colony);
+            Assert.Equal("Akua", colony.Playfield);
+
+            // Обновление колонии (симуляция 10 секунд)
+            colony.Resources.ProductionRate = 100;
+            colony.UnitPool.ProductionRate = 3600; // 1 юнит/сек для быстрого теста
+            colony.UnitPool.MaxGuards = 10;
+
+            for (int i = 0; i < 10; i++)
+            {
+                await colonyManager.UpdateColonyAsync(colony, 1.0f);
+            }
+
+            // Assert - все системы обновились
+            Assert.True(colony.Resources.VirtualResources > 0, "Resources should be produced");
+            Assert.True(colony.UnitPool.AvailableGuards > 0 || colony.UnitPool.ProductionProgress > 0, 
+                "Units should be produced");
+        }
     }
 }
