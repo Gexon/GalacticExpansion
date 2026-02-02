@@ -54,9 +54,13 @@ namespace GalacticExpansion.Core.Economy
     /// </summary>
     public enum UnitType
     {
-        Guard,          // Охранники (пехота)
-        PatrolVessel,   // Патрульные корабли
-        Warship,        // Военные корабли
-        Drone           // Дроны
+        /// <summary>Охранники (пехота).</summary>
+        Guard,
+        /// <summary>Патрульные корабли.</summary>
+        PatrolVessel,
+        /// <summary>Военные корабли.</summary>
+        Warship,
+        /// <summary>Дроны.</summary>
+        Drone
     }
 }

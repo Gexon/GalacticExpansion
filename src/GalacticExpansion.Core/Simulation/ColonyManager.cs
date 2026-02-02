@@ -21,6 +21,14 @@ namespace GalacticExpansion.Core.Simulation
         private readonly IStateStore _stateStore;
         private readonly ILogger _logger;
 
+        /// <summary>
+        /// Создаёт менеджер колоний с зависимостями: стадии, экономика, юнит-экономика, хранилище, логгер.
+        /// </summary>
+        /// <param name="stageManager">Менеджер стадий колоний.</param>
+        /// <param name="economySimulator">Симулятор экономики.</param>
+        /// <param name="unitEconomy">Менеджер юнит-экономики.</param>
+        /// <param name="stateStore">Хранилище состояния.</param>
+        /// <param name="logger">Логгер.</param>
         public ColonyManager(
             IStageManager stageManager,
             IEconomySimulator economySimulator,

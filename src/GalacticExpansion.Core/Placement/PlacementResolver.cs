@@ -77,6 +77,11 @@ namespace GalacticExpansion.Core.Placement
             }
         }
 
+        /// <summary>
+        /// Ищет подходящую позицию для размещения структуры по критериям (спиральный поиск).
+        /// </summary>
+        /// <param name="criteria">Критерии размещения (playfield, радиус, дистанции).</param>
+        /// <returns>Позиция Vector3, подходящая под критерии.</returns>
         public async Task<Vector3> FindSuitableLocationAsync(PlacementCriteria criteria)
         {
             if (criteria == null)
@@ -160,6 +165,12 @@ namespace GalacticExpansion.Core.Placement
             }
         }
 
+        /// <summary>
+        /// Проверяет, подходит ли позиция под критерии (дистанции до структур и игроков).
+        /// </summary>
+        /// <param name="position">Позиция для проверки.</param>
+        /// <param name="criteria">Критерии размещения.</param>
+        /// <returns>True, если позиция подходит.</returns>
         public async Task<bool> IsLocationSuitableAsync(Vector3 position, PlacementCriteria criteria)
         {
             if (criteria == null)
@@ -217,6 +228,13 @@ namespace GalacticExpansion.Core.Placement
             return true;
         }
 
+        /// <summary>
+        /// Возвращает высоту рельефа в точке (x, z) через обёртку playfield.
+        /// </summary>
+        /// <param name="playfieldWrapper">Обёртка playfield (из кэша при IModApi).</param>
+        /// <param name="x">Координата X.</param>
+        /// <param name="z">Координата Z.</param>
+        /// <returns>Высота рельефа в метрах.</returns>
         public float GetTerrainHeight(IPlayfieldWrapper playfieldWrapper, float x, float z)
         {
             if (playfieldWrapper == null)

@@ -10,6 +10,10 @@ using NLog;
 
 namespace GalacticExpansion.Core.Spawning
 {
+    /// <summary>
+    /// Реализация спавна структур и NPC в игре через Empyrion API.
+    /// Координирует PlacementResolver для позиций и IEmpyrionGateway для запросов.
+    /// </summary>
     public class EntitySpawner : IEntitySpawner
     {
         private readonly IEmpyrionGateway _gateway;
@@ -20,6 +24,12 @@ namespace GalacticExpansion.Core.Spawning
         private const int StructureSpawnTimeoutMs = 10000;
         private const int NpcSpawnTimeoutMs = 5000;
 
+        /// <summary>
+        /// Создаёт спавнер сущностей с шлюзом к игре, резолвером размещения и логгером.
+        /// </summary>
+        /// <param name="gateway">Шлюз Empyrion API.</param>
+        /// <param name="placementResolver">Резолвер позиций размещения.</param>
+        /// <param name="logger">Логгер.</param>
         public EntitySpawner(IEmpyrionGateway gateway, IPlacementResolver placementResolver, ILogger logger)
         {
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
@@ -27,6 +37,14 @@ namespace GalacticExpansion.Core.Spawning
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Спавнит структуру по имени префаба в заданной позиции с ротацией и фракцией.
+        /// </summary>
+        /// <param name="prefabName">Имя префаба структуры.</param>
+        /// <param name="position">Позиция (X, Y, Z).</param>
+        /// <param name="rotation">Ротация.</param>
+        /// <param name="factionId">Идентификатор фракции.</param>
+        /// <returns>EntityId созданной структуры.</returns>
         public async Task<int> SpawnStructureAsync(string prefabName, Vector3 position, Vector3 rotation, int factionId)
         {
             if (string.IsNullOrEmpty(prefabName))
@@ -101,6 +119,16 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Спавнит структуру на рельефе: ищет высоту по (x, z) на playfield и вызывает SpawnStructureAsync.
+        /// </summary>
+        /// <param name="playfield">Название playfield.</param>
+        /// <param name="prefabName">Имя префаба.</param>
+        /// <param name="x">Координата X.</param>
+        /// <param name="z">Координата Z.</param>
+        /// <param name="factionId">Идентификатор фракции.</param>
+        /// <param name="heightOffset">Отступ над землёй (метры).</param>
+        /// <returns>EntityId созданной структуры.</returns>
         public async Task<int> SpawnStructureAtTerrainAsync(string playfield, string prefabName, float x, float z,
             int factionId, float heightOffset = 0.5f)
         {
@@ -125,6 +153,15 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Спавнит группу NPC по кругу вокруг центральной позиции с задержкой между спавнами.
+        /// </summary>
+        /// <param name="playfield">Название playfield.</param>
+        /// <param name="npcClassName">Класс NPC (например ZiraxMinigunPatrol).</param>
+        /// <param name="centerPosition">Центр группы.</param>
+        /// <param name="count">Количество NPC.</param>
+        /// <param name="factionName">Имя фракции (например Zirax).</param>
+        /// <returns>Список EntityId созданных NPC.</returns>
         public async Task<List<int>> SpawnNPCGroupAsync(string playfield, string npcClassName, Vector3 centerPosition,
             int count, string factionName)
         {
@@ -173,6 +210,15 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Спавнит одного NPC на рельефе в точке (x, z) на указанном playfield.
+        /// </summary>
+        /// <param name="playfield">Название playfield.</param>
+        /// <param name="npcClassName">Класс NPC.</param>
+        /// <param name="x">Координата X.</param>
+        /// <param name="z">Координата Z.</param>
+        /// <param name="factionName">Имя фракции.</param>
+        /// <returns>EntityId созданного NPC.</returns>
         public async Task<int> SpawnNPCAtTerrainAsync(string playfield, string npcClassName, float x, float z,
             string factionName)
         {
@@ -210,6 +256,10 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Уничтожает сущность по EntityId через API игры.
+        /// </summary>
+        /// <param name="entityId">Идентификатор сущности.</param>
         public async Task DestroyEntityAsync(int entityId)
         {
             if (entityId <= 0)
@@ -236,6 +286,11 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Уничтожает несколько сущностей по списку EntityId; ошибки по отдельным сущностям игнорируются.
+        /// </summary>
+        /// <param name="ids">Идентификаторы сущностей.</param>
+        /// <returns>Количество успешно уничтоженных сущностей.</returns>
         public async Task<int> DestroyEntitiesAsync(IEnumerable<int> ids)
         {
             if (ids == null || !ids.Any())
@@ -258,6 +313,11 @@ namespace GalacticExpansion.Core.Spawning
             return successCount;
         }
 
+        /// <summary>
+        /// Проверяет существование сущности по EntityId через запрос позиции/ротации.
+        /// </summary>
+        /// <param name="entityId">Идентификатор сущности.</param>
+        /// <returns>True, если сущность существует.</returns>
         public async Task<bool> EntityExistsAsync(int entityId)
         {
             if (entityId <= 0)

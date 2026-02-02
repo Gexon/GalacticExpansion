@@ -15,12 +15,22 @@ namespace GalacticExpansion.Core.Economy
         private readonly ILogger _logger;
         private const float ResourceNodeBonus = 20f;
 
+        /// <summary>
+        /// Создаёт симулятор экономики с заданной конфигурацией и логгером.
+        /// </summary>
+        /// <param name="config">Конфигурация мода (стадии, ресурсы).</param>
+        /// <param name="logger">Логгер для диагностики.</param>
         public EconomySimulator(Configuration config, ILogger logger)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Обновляет производство виртуальных ресурсов колонии за интервал времени.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <param name="deltaTime">Интервал времени в секундах.</param>
         public void UpdateProduction(Colony colony, float deltaTime)
         {
             if (colony == null)
@@ -36,6 +46,11 @@ namespace GalacticExpansion.Core.Economy
             colony.Resources.VirtualResources += produced;
         }
 
+        /// <summary>
+        /// Добавляет аванпост ресурсов к колонии и увеличивает ProductionBonus.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <param name="node">Узел ресурсов (аванпост).</param>
         public void AddResourceNode(Colony colony, ResourceNode node)
         {
             if (colony == null)
@@ -51,6 +66,11 @@ namespace GalacticExpansion.Core.Economy
             }
         }
 
+        /// <summary>
+        /// Удаляет аванпост ресурсов по идентификатору и уменьшает ProductionBonus.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <param name="nodeId">Идентификатор узла.</param>
         public void RemoveResourceNode(Colony colony, string nodeId)
         {
             if (colony == null)
@@ -71,6 +91,11 @@ namespace GalacticExpansion.Core.Economy
             }
         }
 
+        /// <summary>
+        /// Проверяет, достаточно ли виртуальных ресурсов для перехода на следующую стадию.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <returns>True, если ресурсов достаточно.</returns>
         public bool HasEnoughResourcesForUpgrade(Colony colony)
         {
             if (colony == null)
@@ -84,6 +109,11 @@ namespace GalacticExpansion.Core.Economy
             return colony.Resources.VirtualResources >= stageConfig.RequiredResources;
         }
 
+        /// <summary>
+        /// Списывает виртуальные ресурсы при апгрейде колонии.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <param name="cost">Стоимость в виртуальных ресурсах.</param>
         public void ConsumeResourcesForUpgrade(Colony colony, float cost)
         {
             if (colony == null)
@@ -96,6 +126,12 @@ namespace GalacticExpansion.Core.Economy
             _logger.Info($"Colony {colony.Id}: Consumed {cost} resources for upgrade. Remaining: {colony.Resources.VirtualResources:F2}");
         }
 
+        /// <summary>
+        /// Вычисляет время в секундах до накопления требуемых ресурсов для апгрейда.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <param name="requiredResources">Требуемое количество ресурсов.</param>
+        /// <returns>Секунды до апгрейда; 0 если уже достаточно; MaxValue если производство нулевое.</returns>
         public float GetTimeUntilNextUpgradeSeconds(Colony colony, float requiredResources)
         {
             if (colony == null)

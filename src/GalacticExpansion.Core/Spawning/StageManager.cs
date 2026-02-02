@@ -28,6 +28,18 @@ namespace GalacticExpansion.Core.Spawning
         private readonly Configuration _config;
         private readonly ILogger _logger;
 
+        /// <summary>
+        /// Создаёт менеджер стадий с зависимостями: шлюз, спавнер, размещение, экономика, юнит-экономика, state, event bus, конфиг, логгер.
+        /// </summary>
+        /// <param name="gateway">Шлюз Empyrion API.</param>
+        /// <param name="entitySpawner">Спавнер сущностей.</param>
+        /// <param name="placementResolver">Резолвер размещения.</param>
+        /// <param name="economySimulator">Симулятор экономики.</param>
+        /// <param name="unitEconomy">Менеджер юнит-экономики.</param>
+        /// <param name="stateStore">Хранилище состояния.</param>
+        /// <param name="eventBus">Шина событий.</param>
+        /// <param name="config">Конфигурация мода.</param>
+        /// <param name="logger">Логгер.</param>
         public StageManager(
             IEmpyrionGateway gateway,
             IEntitySpawner entitySpawner,
@@ -50,6 +62,11 @@ namespace GalacticExpansion.Core.Spawning
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Проверяет, можно ли перейти на следующую стадию (ресурсы, время, существование главной структуры).
+        /// </summary>
+        /// <param name="colony">Колония.</param>
+        /// <returns>True, если переход возможен.</returns>
         public async Task<bool> CanTransitionToNextStageAsync(Colony colony)
         {
             if (colony == null)
@@ -86,6 +103,10 @@ namespace GalacticExpansion.Core.Spawning
             return true;
         }
 
+        /// <summary>
+        /// Выполняет переход колонии на следующую стадию: замена структуры, потребление ресурсов, спавн охранников, сохранение state, публикация события.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
         public async Task TransitionToNextStageAsync(Colony colony)
         {
             if (colony == null)
@@ -217,6 +238,10 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Понижает стадию колонии на одну ступень (обновляет state, сбрасывает MainStructureId).
+        /// </summary>
+        /// <param name="colony">Колония.</param>
         public async Task DowngradeColonyAsync(Colony colony)
         {
             if (colony == null)
@@ -253,6 +278,10 @@ namespace GalacticExpansion.Core.Spawning
             await _stateStore.SaveAsync(state);
         }
 
+        /// <summary>
+        /// Поддерживает структуры колонии: Touch главной структуры и аванпостов для защиты от decay.
+        /// </summary>
+        /// <param name="colony">Колония.</param>
         public async Task MaintainColonyStructuresAsync(Colony colony)
         {
             if (colony == null || !colony.MainStructureId.HasValue)
@@ -270,6 +299,13 @@ namespace GalacticExpansion.Core.Spawning
             }
         }
 
+        /// <summary>
+        /// Инициализирует новую колонию: создаёт объект Colony, спавнит DropShip, сохраняет MainStructureId и CreatedAt.
+        /// </summary>
+        /// <param name="playfield">Название playfield.</param>
+        /// <param name="position">Позиция колонии.</param>
+        /// <param name="factionId">Идентификатор фракции.</param>
+        /// <returns>Созданная колония в стадии LandingPending.</returns>
         public async Task<Colony> InitializeColonyAsync(string playfield, Vector3 position, int factionId)
         {
             _logger.Info($"Initializing new colony on '{playfield}' at {position}");
@@ -322,8 +358,11 @@ namespace GalacticExpansion.Core.Spawning
     /// </summary>
     public class StageTransitionEvent
     {
+        /// <summary>Идентификатор колонии.</summary>
         public string ColonyId { get; set; } = string.Empty;
+        /// <summary>Предыдущая стадия.</summary>
         public ColonyStage PreviousStage { get; set; }
+        /// <summary>Новая стадия после перехода.</summary>
         public ColonyStage NewStage { get; set; }
     }
 }
