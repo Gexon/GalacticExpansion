@@ -127,6 +127,11 @@ find <часть имени структуры>
 | `structlod` | Список структур с дистанцией от игрока | 3+ |
 | `stats` | Статус текущего playfield | 3+ |
 
+`Gm fly` (normal God mode)
+`Gm iv` (invisible, ai can't see you)
+`Gm ic` (God mode without noclip and fly, good for testing internal mechanics of a poi)
+`ai off`/`on` (pauses all ai, including NPCs and turrets)
+
 Рекомендуется включить **godmode** (`gm`) перед телепортом к колонии, чтобы не погибнуть от NPC или падения.
 
 ---
