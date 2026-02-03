@@ -35,6 +35,13 @@
 - При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo` (поле `errorType` — enum `ErrorType`).
 - Шлюз в `HandleEvent` обрабатывает Event_Error до попытки завершить ответ ожидаемым типом: извлекает текст из `ErrorInfo` (в т.ч. `errorType.ToString()` для понятного кода в логах), вызывает `SequenceManager.CompleteWithError(seqNr, exception)` — вызывающий получает исключение вместо "Type mismatch".
 
+### Playfield Load Handling (Event_Playfield_Loaded)
+- Событие `CmdId.Event_Playfield_Loaded` приходит с данными типа `PlayfieldLoad` (Mif/Eleon.Modding) с полями `sec`, `playfield`, `processId`.
+- `ColonyTickModule` подписан на `IEmpyrionGateway.GameEventReceived` и при `Event_Playfield_Loaded`:
+  - Извлекает имя playfield из объекта `PlayfieldLoad`.
+  - Если это `HomePlayfield` и state пустой (и экспансия включена) — создаёт первую колонию только после загрузки этого playfield (никакого спавна в незагруженный playfield).
+  - Для любого playfield вызывает `IColonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield)` — обновление/защита уже существующих структур колоний на этом playfield, база для дальнейшего спавна виртуальных структур/юнитов при загрузке playfield или входе игрока.
+
 ## Важные инварианты
 
 1. `State.json` всегда валиден (атомарная запись + бэкапы).

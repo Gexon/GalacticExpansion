@@ -7,7 +7,7 @@
     "StateBackupIntervalHours": 24,
     "KeepBackupCount": 10
   },
-  "HomePlayfield": "Akua",
+  "HomePlayfield": "Temperate Planet",
   "EnableExpansion": true,
   "Limits": {
     "MaxColoniesPerPlayfield": 1,

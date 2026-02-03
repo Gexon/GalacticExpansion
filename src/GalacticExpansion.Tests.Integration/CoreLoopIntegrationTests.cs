@@ -146,7 +146,8 @@ namespace GalacticExpansion.Tests.Integration
             // Act - Первый запуск
             await simulationEngine.StartAsync();
             
-            // Модифицируем state
+            // Модифицируем state и сразу сохраняем: движок перезагружает state каждый тик из диска,
+            // поэтому без явного SaveAsync изменения потеряются при следующем тике.
             var state = simulationEngine.State;
             state.Colonies.Add(new Colony 
             { 
@@ -155,6 +156,7 @@ namespace GalacticExpansion.Tests.Integration
                 Stage = ColonyStage.BaseL1
             });
             state.IsDirty = true;
+            await stateStore.SaveAsync(state);
 
             await Task.Delay(1500);
             await simulationEngine.StopAsync();

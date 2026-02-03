@@ -38,6 +38,16 @@
 
 - При ошибке запроса игра возвращает `CmdId.Event_Error`, данные — `ErrorInfo` (поле `errorType` типа `ErrorType`). В логах и исключениях используется `errorType.ToString()` (например, `EntityNotLocalToPlayfield`, `PlayfieldConnectionNotFound`). См. `EmpyrionGateway.HandleEvent` и `GetErrorMessageFromErrorInfo`.
 
+## ModAPI: загрузка playfield
+
+- Событие `CmdId.Event_Playfield_Loaded` использует тип данных `PlayfieldLoad` (из `Mif.dll` / `Eleon.Modding`), содержащий:
+  - `sec` — время загрузки playfield в секундах,
+  - `playfield` — имя загруженного playfield,
+  - `processId` — ID процесса/инстанса.
+- В `ColonyTickModule` данные события декодируются как `PlayfieldLoad`, имя playfield берётся из поля `playfield` и используется для:
+  - отложенного создания первой колонии на `HomePlayfield` (Phase 3.5, первая физическая база появляется только после загрузки нужного playfield),
+  - вызова `IColonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield)` для обновления/защиты структур колоний на этом playfield.
+
 ## Известные нюансы
 
 - В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`.

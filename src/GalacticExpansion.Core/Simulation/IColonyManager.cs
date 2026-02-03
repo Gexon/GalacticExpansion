@@ -23,5 +23,12 @@ namespace GalacticExpansion.Core.Simulation
         /// Удаляет колонию
         /// </summary>
         Task RemoveColonyAsync(string colonyId);
+
+        /// <summary>
+        /// При загрузке playfield (Event_Playfield_Loaded): обновление/защита структур колоний на этом playfield.
+        /// Колонии виртуальны; при загрузке playfield вызывается Touch структур (защита от decay) и в будущем — спавн недостающих структур/юнитов.
+        /// </summary>
+        /// <param name="playfield">Имя загруженного playfield.</param>
+        Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
     }
 }

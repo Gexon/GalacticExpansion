@@ -100,6 +100,34 @@ namespace GalacticExpansion.Core.Simulation
         /// Удаляет колонию
         /// </summary>
         /// <summary>
+        /// При загрузке playfield вызывается из ColonyTickModule по Event_Playfield_Loaded.
+        /// Обновляет/защищает структуры колоний на этом playfield (Touch от decay); в будущем здесь же — спавн недостающих структур и юнитов.
+        /// </summary>
+        public async Task EnsurePlayfieldColoniesSpawnedAsync(string playfield)
+        {
+            if (string.IsNullOrWhiteSpace(playfield))
+                return;
+
+            var state = await _stateStore.LoadAsync();
+            var coloniesOnPlayfield = state.Colonies.Where(c => string.Equals(c.Playfield, playfield, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (coloniesOnPlayfield.Count == 0)
+                return;
+
+            _logger.Debug($"EnsurePlayfieldColoniesSpawned: playfield '{playfield}', {coloniesOnPlayfield.Count} colony(ies)");
+            foreach (var colony in coloniesOnPlayfield)
+            {
+                try
+                {
+                    await _stageManager.MaintainColonyStructuresAsync(colony);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(ex, $"EnsurePlayfieldColoniesSpawned: error maintaining colony {colony.Id} on {playfield}");
+                }
+            }
+        }
+
+        /// <summary>
         /// Удаляет колонию из системы
         /// </summary>
         public async Task RemoveColonyAsync(string colonyId)

@@ -247,6 +247,13 @@ namespace GalacticExpansion.Core.Simulation
                 // Обновляем все модули
                 _moduleRegistry.UpdateAllModules(context);
 
+                // Перезагрузка state после обновления модулей: колония может быть создана по Event_Playfield_Loaded вне тика;
+                // без перезагрузки _state в движке оставался бы старым и колония не обновлялась бы до перезапуска.
+                lock (_stateLock)
+                {
+                    _state = _stateStore.LoadAsync().GetAwaiter().GetResult();
+                }
+
                 // Публикуем событие тика
                 sw.Stop();
                 _eventBus.Publish(new SimulationTickEvent

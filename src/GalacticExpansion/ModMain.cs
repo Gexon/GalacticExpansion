@@ -202,8 +202,8 @@ namespace GalacticExpansion
                 _container.Register<IColonyManager>(colonyManager);
                 _logger.Info("ColonyManager registered");
 
-                // ColonyTickModule — обновление колоний по тику и создание первой колонии при пустом state
-                var colonyTickModule = new ColonyTickModule(colonyManager, placementResolver, _config, _logger);
+                // ColonyTickModule — обновление колоний по тику; первая колония создаётся по Event_Playfield_Loaded для HomePlayfield
+                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, _config, _logger);
                 _simulationEngine.RegisterModule(colonyTickModule);
                 _logger.Info("ColonyTickModule registered");
                 

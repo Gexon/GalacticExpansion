@@ -131,6 +131,12 @@ find <часть имени структуры>
 `Gm iv` (invisible, ai can't see you)
 `Gm ic` (God mode without noclip and fly, good for testing internal mechanics of a poi)
 `ai off`/`on` (pauses all ai, including NPCs and turrets)
+`sector` - Выведет список доступных секторов.
+`map` - открывает все ресурсы и посты на карте
+`debugmenu` - включает/выключает меню отладки.
+`find` - показывает координаты и ID объекта по имени, если он расположен в текущей зоне. Если название объекта состоит из двух и более слов, то его следует писать в одиночных кавычках.
+
+`Temperate Planet`, `Arid Planet`
 
 Рекомендуется включить **godmode** (`gm`) перед телепортом к колонии, чтобы не погибнуть от NPC или падения.
 
