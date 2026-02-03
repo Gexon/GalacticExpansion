@@ -196,11 +196,11 @@ namespace GalacticExpansion.Core.Simulation
 
                 // 2. Сохранение state
                 _logger.Info("Saving simulation state...");
-                await _stateStore.SaveAsync(_state);
+                await _stateStore.SaveAsync(_state).ConfigureAwait(false);
 
                 // 3. Завершение модулей
                 _logger.Info("Shutting down modules...");
-                await _moduleRegistry.ShutdownAllModulesAsync();
+                await _moduleRegistry.ShutdownAllModulesAsync().ConfigureAwait(false);
 
                 _logger.Info("SimulationEngine stopped successfully");
             }

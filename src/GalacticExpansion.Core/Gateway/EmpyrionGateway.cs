@@ -85,12 +85,18 @@ namespace GalacticExpansion.Core.Gateway
             Logger.Info("Stopping EmpyrionGateway...");
 
             _isRunning = false;
-            
-            // Останавливаем очередь запросов
-            _requestQueue.StopAsync().Wait();
-            
-            // Отменяем все ожидающие запросы
+
+            // Сначала отменяем все ожидающие ответы, чтобы вызывающие не висели на SendRequestAsync
             _sequenceManager.CancelAll();
+
+            // Останавливаем очередь с таймаутом: при shutdown игра может не отвечать на запросы,
+            // и синхронный Wait() без таймаута может привести к зависанию сервера
+            const int shutdownTimeoutMs = 5000;
+            var stopTask = _requestQueue.StopAsync();
+            if (!stopTask.Wait(shutdownTimeoutMs))
+            {
+                Logger.Warn($"RequestQueue did not stop within {shutdownTimeoutMs}ms. Proceeding with shutdown.");
+            }
 
             Logger.Info("EmpyrionGateway stopped");
         }

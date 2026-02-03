@@ -117,7 +117,9 @@ namespace GalacticExpansion.Core.Gateway
 
             if (_processingTask != null)
             {
-                await _processingTask;
+                // ConfigureAwait(false) критичен: иначе при вызове из Game_Exit (главный поток игры)
+                // продолжение после await попытается выполниться в том же контексте и произойдёт дедлок.
+                await _processingTask.ConfigureAwait(false);
             }
 
             Logger.Info("RequestQueue stopped");

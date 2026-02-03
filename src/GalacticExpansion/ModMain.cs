@@ -202,8 +202,10 @@ namespace GalacticExpansion
                 _container.Register<IColonyManager>(colonyManager);
                 _logger.Info("ColonyManager registered");
 
-                // ColonyTickModule — обновление колоний по тику; первая колония создаётся по Event_Playfield_Loaded для HomePlayfield
-                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, _config, _logger);
+                // ColonyTickModule — обновление колоний по тику;
+                // первая колония теперь создаётся по событию входа игрока на HomePlayfield (PlayerEnteredPlayfieldEvent),
+                // а не напрямую по Event_Playfield_Loaded, чтобы избежать ошибок PlayfieldConnectionNotFound.
+                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
                 _simulationEngine.RegisterModule(colonyTickModule);
                 _logger.Info("ColonyTickModule registered");
                 
@@ -300,15 +302,27 @@ namespace GalacticExpansion
                 _logger?.Info("GLEX shutting down...");
                 _logger?.Info("========================================");
 
+                // Таймауты при shutdown: Game_Exit вызывается из главного потока игры; бесконечный .Wait()
+                // приводит к тому, что сервер не может закрыться. При таймауте продолжаем выход.
+                const int simulationShutdownMs = 15000;
+                const int backupShutdownMs = 10000;
+
                 // 1. Останавливаем SimulationEngine (сохранит state и завершит модули)
                 if (_simulationEngine != null && _simulationEngine.IsRunning)
                 {
                     _logger?.Info("Stopping SimulationEngine...");
-                    _simulationEngine.StopAsync().Wait();
-                    _logger?.Info("SimulationEngine stopped");
+                    var simStopTask = _simulationEngine.StopAsync();
+                    if (!simStopTask.Wait(simulationShutdownMs))
+                    {
+                        _logger?.Warn($"SimulationEngine did not stop within {simulationShutdownMs}ms. Proceeding with shutdown.");
+                    }
+                    else
+                    {
+                        _logger?.Info("SimulationEngine stopped");
+                    }
                 }
 
-                // 2. Останавливаем Gateway
+                // 2. Останавливаем Gateway (внутри уже есть таймаут 5s для RequestQueue)
                 if (_gateway != null && _gateway.IsRunning)
                 {
                     _logger?.Info("Stopping Gateway...");
@@ -320,8 +334,15 @@ namespace GalacticExpansion
                 if (_stateStore != null)
                 {
                     _logger?.Info("Creating final backup...");
-                    _stateStore.CreateBackupAsync().Wait();
-                    _logger?.Info("Backup created");
+                    var backupTask = _stateStore.CreateBackupAsync();
+                    if (!backupTask.Wait(backupShutdownMs))
+                    {
+                        _logger?.Warn($"Final backup did not complete within {backupShutdownMs}ms. Proceeding with shutdown.");
+                    }
+                    else
+                    {
+                        _logger?.Info("Backup created");
+                    }
                 }
 
                 _logger?.Info("========================================");

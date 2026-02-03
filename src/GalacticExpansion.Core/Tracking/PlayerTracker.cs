@@ -237,12 +237,17 @@ namespace GalacticExpansion.Core.Tracking
         /// </summary>
         private void HandlePlayerConnected(object data)
         {
+            // Событие Event_Player_Connected приходит с минимальным набором данных (Id),
+            // без playfield и, как правило, до Event_Player_ChangedPlayfield.
+            // Здесь мы:
+            // 1) Обновляем кэш TrackedPlayerInfo по playerId;
+            // 2) Логируем расширенную диагностическую строку с Id, именем и текущим playfield.
+            //    На момент подключения playfield, как правило, ещё неизвестен, поэтому в лог
+            //    попадает "<unknown>", что явно показывает состояние трекинга.
             if (!(data is Id playerData))
                 return;
 
             var playerId = playerData.id;
-
-            _logger.Debug($"Player {playerId} connected");
 
             // Создаем или обновляем информацию об игроке
             var player = _playersById.GetOrAdd(playerId, id => new TrackedPlayerInfo
@@ -255,6 +260,13 @@ namespace GalacticExpansion.Core.Tracking
 
             player.IsOnline = true;
             player.LastSeen = DateTime.UtcNow;
+
+            var playfieldForLog = string.IsNullOrWhiteSpace(player.CurrentPlayfield)
+                ? "<unknown>"
+                : player.CurrentPlayfield;
+
+            _logger.Debug(
+                $"Player connected: Id={playerId}, Name='{player.PlayerName}', Playfield='{playfieldForLog}'");
         }
 
         /// <summary>

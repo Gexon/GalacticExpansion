@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Eleon.Modding;
 using GalacticExpansion.Core.Gateway;
 using GalacticExpansion.Core.Placement;
+using GalacticExpansion.Core.Simulation.Events;
 using GalacticExpansion.Models;
 using NLog;
 
@@ -19,6 +20,7 @@ namespace GalacticExpansion.Core.Simulation
         private readonly IEmpyrionGateway _gateway;
         private readonly IColonyManager _colonyManager;
         private readonly IPlacementResolver _placementResolver;
+        private readonly IEventBus _eventBus;
         private readonly Configuration _config;
         private readonly ILogger _logger;
 
@@ -37,18 +39,21 @@ namespace GalacticExpansion.Core.Simulation
         /// <param name="gateway">Шлюз для подписки на Event_Playfield_Loaded.</param>
         /// <param name="colonyManager">Менеджер колоний для UpdateColonyAsync, CreateColonyAsync и EnsurePlayfieldColoniesSpawnedAsync.</param>
         /// <param name="placementResolver">Резолвер размещения для поиска позиции первой колонии.</param>
+        /// <param name="eventBus">Внутренний EventBus для подписки на события входа игрока на playfield.</param>
         /// <param name="config">Конфигурация (HomePlayfield, EnableExpansion, Zirax.FactionId).</param>
         /// <param name="logger">Логгер.</param>
         public ColonyTickModule(
             IEmpyrionGateway gateway,
             IColonyManager colonyManager,
             IPlacementResolver placementResolver,
+            IEventBus eventBus,
             Configuration config,
             ILogger logger)
         {
             _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _colonyManager = colonyManager ?? throw new ArgumentNullException(nameof(colonyManager));
             _placementResolver = placementResolver ?? throw new ArgumentNullException(nameof(placementResolver));
+            _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -58,18 +63,25 @@ namespace GalacticExpansion.Core.Simulation
         {
             _logger.Info("ColonyTickModule initializing...");
 
-            // Первую колонию создаём по Event_Playfield_Loaded для HomePlayfield, а не здесь (playfield при старте ещё не загружен — PlayfieldConnectionNotFound).
+            // Первую колонию больше не создаём по Event_Playfield_Loaded: спавн переносится на событие входа игрока на HomePlayfield.
+            // Здесь лишь помечаем, что колония ожидается, если state пуст и экспансия включена.
             if (state.Colonies.Count == 0 && _config.EnableExpansion)
             {
                 _initialColonyPending = true;
-                _logger.Info("ColonyTickModule: initial colony will be created when HomePlayfield loads (Event_Playfield_Loaded)");
+                _logger.Info("ColonyTickModule: initial colony will be created when a player enters HomePlayfield (PlayerEnteredPlayfieldEvent)");
             }
             else if (state.Colonies.Count > 0)
             {
                 _logger.Info($"ColonyTickModule: {state.Colonies.Count} colony(ies) already in state, skipping initial colony creation");
             }
 
+            // Подписка на низкоуровневые игровые события (в т.ч. Event_Playfield_Loaded) через шлюз.
             _gateway.GameEventReceived += OnGameEvent;
+
+            // Подписка на доменное событие входа игрока на playfield.
+            // Именно это событие теперь запускает создание первой колонии на HomePlayfield.
+            _eventBus.Subscribe<PlayerEnteredPlayfieldEvent>(OnPlayerEnteredPlayfield);
+
             _logger.Info("ColonyTickModule initialized");
             return Task.CompletedTask;
         }
@@ -92,19 +104,15 @@ namespace GalacticExpansion.Core.Simulation
             var playfield = playfieldName!;
             _logger.Info($"ColonyTickModule: Playfield_Loaded '{playfield}' — ensuring colonies on playfield");
 
-            var homePlayfield = _config.HomePlayfield ?? "Akua";
-            if (string.Equals(playfield, homePlayfield, StringComparison.OrdinalIgnoreCase) && _initialColonyPending)
-            {
-                _initialColonyPending = false;
-                _ = Task.Run(() => CreateInitialColonyWhenPlayfieldLoadedAsync(playfield));
-            }
-
-            // При загрузке playfield — обновление/защита структур колоний на нём (Touch); в будущем — спавн недостающих структур и юнитов.
+            // При загрузке playfield — обновление/защита структур колоний на нём (Touch);
+            // ВАЖНО: спавн первой колонии больше не привязан к этому событию, а запускается по входу игрока.
             _ = Task.Run(() => _colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield));
         }
 
         /// <summary>
-        /// Создаёт первую колонию после загрузки HomePlayfield (вызывается асинхронно по Event_Playfield_Loaded).
+        /// Создаёт первую колонию на HomePlayfield.
+        /// Вызывается асинхронно по доменному событию входа игрока на нужный playfield
+        /// (PlayerEnteredPlayfieldEvent), после чего фактический спавн структуры идёт через StageManager/EntitySpawner.
         /// </summary>
         private async Task CreateInitialColonyWhenPlayfieldLoadedAsync(string playfield)
         {
@@ -137,8 +145,37 @@ namespace GalacticExpansion.Core.Simulation
             catch (Exception ex)
             {
                 _logger.Error(ex, $"ColonyTickModule: failed to create initial colony on {playfield}");
-                _initialColonyPending = true; // Повторить при следующем Playfield_Loaded
+                _initialColonyPending = true; // Повторить при следующем входе игрока на HomePlayfield
             }
+        }
+
+        /// <summary>
+        /// Обработчик доменного события входа игрока на playfield.
+        /// Спавн первой колонии переносится на это событие, чтобы гарантировать, что playfield полностью готов к операциям ModAPI.
+        /// </summary>
+        private void OnPlayerEnteredPlayfield(PlayerEnteredPlayfieldEvent evt)
+        {
+            if (evt == null)
+                return;
+
+            var homePlayfield = _config.HomePlayfield ?? "Akua";
+
+            // Игнорируем, если экспансия выключена или первая колония уже создана/в процессе создания.
+            if (!_config.EnableExpansion || !_initialColonyPending)
+                return;
+
+            // Нас интересует только вход на HomePlayfield.
+            if (!string.Equals(evt.Playfield, homePlayfield, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _logger.Info(
+                $"ColonyTickModule: player '{evt.PlayerName}' (Id={evt.PlayerId}) entered HomePlayfield '{evt.Playfield}' — scheduling initial colony creation");
+
+            // Сбрасываем флаг ожидания, чтобы избежать параллельных запусков.
+            _initialColonyPending = false;
+
+            // Запускаем асинхронное создание первой колонии.
+            _ = Task.Run(() => CreateInitialColonyWhenPlayfieldLoadedAsync(evt.Playfield));
         }
 
         /// <summary>
@@ -217,6 +254,7 @@ namespace GalacticExpansion.Core.Simulation
         public Task ShutdownAsync()
         {
             _gateway.GameEventReceived -= OnGameEvent;
+            _eventBus.Unsubscribe<PlayerEnteredPlayfieldEvent>(OnPlayerEnteredPlayfield);
             _logger.Info("ColonyTickModule shutting down");
             return Task.CompletedTask;
         }

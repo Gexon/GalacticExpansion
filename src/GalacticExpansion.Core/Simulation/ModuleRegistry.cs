@@ -157,7 +157,9 @@ namespace GalacticExpansion.Core.Simulation
             {
                 try
                 {
-                    await module.ShutdownAsync();
+                    // ConfigureAwait(false) — при вызове из Game_Exit главный поток блокируется на .Wait();
+                    // без этого продолжение после await пытается вернуться в тот же контекст и возникает дедлок.
+                    await module.ShutdownAsync().ConfigureAwait(false);
                     _logger.Info($"Module '{module.ModuleName}' shut down successfully");
                 }
                 catch (Exception ex)
