@@ -1,8 +1,6 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Eleon.Modding;
-using GalacticExpansion.Core.Gateway;
 using GalacticExpansion.Core.Placement;
 using GalacticExpansion.Core.Simulation.Events;
 using GalacticExpansion.Models;
@@ -11,13 +9,12 @@ using NLog;
 namespace GalacticExpansion.Core.Simulation
 {
     /// <summary>
-    /// Модуль симуляции: обновление колоний по тику и реакция на загрузку playfield.
+    /// Модуль симуляции: обновление колоний по тику.
     /// Создаёт виртуальную колонию при инициализации (если state пуст).
-    /// При загрузке playfield вызывается EnsurePlayfieldColoniesSpawnedAsync — материализация виртуальных колоний и обновление/защита структур.
+    /// Материализация виртуальных колоний происходит через IModApi.OnPlayfieldLoaded (обрабатывается в ModMain).
     /// </summary>
     public class ColonyTickModule : ISimulationModule
     {
-        private readonly IEmpyrionGateway _gateway;
         private readonly IColonyManager _colonyManager;
         private readonly IPlacementResolver _placementResolver;
         private readonly IEventBus _eventBus;
@@ -33,21 +30,18 @@ namespace GalacticExpansion.Core.Simulation
         /// <summary>
         /// Создаёт модуль обновления колоний по тику.
         /// </summary>
-        /// <param name="gateway">Шлюз для подписки на Event_Playfield_Loaded.</param>
-        /// <param name="colonyManager">Менеджер колоний для UpdateColonyAsync, CreateColonyAsync и EnsurePlayfieldColoniesSpawnedAsync.</param>
+        /// <param name="colonyManager">Менеджер колоний для UpdateColonyAsync, CreateColonyAsync и материализации.</param>
         /// <param name="placementResolver">Резолвер размещения для поиска позиции первой колонии.</param>
-        /// <param name="eventBus">Внутренний EventBus для подписки на события входа игрока на playfield.</param>
+        /// <param name="eventBus">Внутренний EventBus для подписки на события (зарезервировано для будущего использования).</param>
         /// <param name="config">Конфигурация (HomePlayfield, EnableExpansion, Zirax.FactionId).</param>
         /// <param name="logger">Логгер.</param>
         public ColonyTickModule(
-            IEmpyrionGateway gateway,
             IColonyManager colonyManager,
             IPlacementResolver placementResolver,
             IEventBus eventBus,
             Configuration config,
             ILogger logger)
         {
-            _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _colonyManager = colonyManager ?? throw new ArgumentNullException(nameof(colonyManager));
             _placementResolver = placementResolver ?? throw new ArgumentNullException(nameof(placementResolver));
             _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -71,33 +65,10 @@ namespace GalacticExpansion.Core.Simulation
                 _logger.Info($"ColonyTickModule: {state.Colonies.Count} colony(ies) already in state");
             }
 
-            // Подписка на низкоуровневые игровые события (в т.ч. Event_Playfield_Loaded) через шлюз.
-            _gateway.GameEventReceived += OnGameEvent;
+            // Примечание: обработка загрузки playfield теперь происходит через IModApi.OnPlayfieldLoaded в ModMain
+            // (это правильный способ детектировать готовность playfield для операций спавна)
 
             _logger.Info("ColonyTickModule initialized");
-        }
-
-        /// <summary>
-        /// Обработчик событий от игры: Event_Playfield_Loaded — создание первой колонии при загрузке HomePlayfield и обновление структур на playfield.
-        /// </summary>
-        private void OnGameEvent(object? sender, GameEventArgs e)
-        {
-            if (e.EventId != CmdId.Event_Playfield_Loaded)
-                return;
-
-            var playfieldName = GetPlayfieldNameFromEventData(e.Data);
-            if (string.IsNullOrWhiteSpace(playfieldName))
-            {
-                _logger.Debug("ColonyTickModule: Event_Playfield_Loaded received but could not get playfield name from data");
-                return;
-            }
-
-            var playfield = playfieldName!;
-            _logger.Info($"ColonyTickModule: Playfield_Loaded '{playfield}' — ensuring colonies on playfield");
-
-            // При загрузке playfield — обновление/защита структур колоний на нём (Touch);
-            // ВАЖНО: спавн первой колонии больше не привязан к этому событию, а запускается по входу игрока.
-            _ = Task.Run(() => _colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield));
         }
 
         /// <summary>
@@ -124,52 +95,6 @@ namespace GalacticExpansion.Core.Simulation
             }
         }
 
-        /// <summary>
-        /// Извлекает имя playfield из данных события Event_Playfield_Loaded.
-        /// Официальный тип данных: PlayfieldLoad (Eleon.Modding) с полем playfield (string).
-        /// Также поддерживает строку напрямую и объекты с свойствами Playfield/playfield/Name для совместимости.
-        /// </summary>
-        private string? GetPlayfieldNameFromEventData(object? data)
-        {
-            if (data == null) return null;
-
-            // Официальный тип: Eleon.Modding.PlayfieldLoad с полем playfield
-            var type = data.GetType();
-            _logger.Debug($"GetPlayfieldNameFromEventData. type.Name: {type.Name}");
-            _logger.Debug($"GetPlayfieldNameFromEventData. type.FullName : {type.FullName}");
-           
-            if (data is PlayfieldLoad pf)
-            {
-                _logger.Debug(
-                    $"GetPlayfieldNameFromEventData: PlayfieldLoad " +
-                    $"sec={pf.sec}, playfield='{pf.playfield}', processId={pf.processId}");
-
-                if (!string.IsNullOrWhiteSpace(pf.playfield))
-                    return pf.playfield.Trim();
-
-                return null;
-            }
-
-            try
-            {
-                // Fallback: строка напрямую
-                if (data is string s && !string.IsNullOrWhiteSpace(s)) return s.Trim();
-
-                // Fallback: другие объекты с свойствами Playfield/playfield/Name
-                var prop = type.GetProperty("Playfield") ?? type.GetProperty("playfield") ?? type.GetProperty("Name") ?? type.GetProperty("name");
-                if (prop != null && prop.CanRead)
-                {
-                    var value = prop.GetValue(data);
-                    if (value is string str && !string.IsNullOrWhiteSpace(str)) return str.Trim();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, $"GetPlayfieldNameFromEventData: Fallback error");
-            }
-
-            return null;
-        }
 
         /// <inheritdoc/>
         public void OnSimulationUpdate(SimulationContext context)
@@ -210,7 +135,6 @@ namespace GalacticExpansion.Core.Simulation
         /// <inheritdoc/>
         public Task ShutdownAsync()
         {
-            _gateway.GameEventReceived -= OnGameEvent;
             _logger.Info("ColonyTickModule shutting down");
             return Task.CompletedTask;
         }

@@ -202,10 +202,9 @@ namespace GalacticExpansion
                 _container.Register<IColonyManager>(colonyManager);
                 _logger.Info("ColonyManager registered");
 
-                // ColonyTickModule — обновление колоний по тику;
-                // первая колония теперь создаётся по событию входа игрока на HomePlayfield (PlayerEnteredPlayfieldEvent),
-                // а не напрямую по Event_Playfield_Loaded, чтобы избежать ошибок PlayfieldConnectionNotFound.
-                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
+                // ColonyTickModule — обновление колоний по тику и создание первой виртуальной колонии.
+                // Материализация виртуальных колоний происходит через IModApi.OnPlayfieldLoaded (обрабатывается в IMod.Init).
+                var colonyTickModule = new ColonyTickModule(colonyManager, placementResolver, eventBus, _config, _logger);
                 _simulationEngine.RegisterModule(colonyTickModule);
                 _logger.Info("ColonyTickModule registered");
                 
@@ -473,11 +472,68 @@ namespace GalacticExpansion
                 {
                     _logger.Info("✅ IModApi initialized (PlacementResolver not resolved, terrain may use fallback)");
                 }
+
+                // Подписка на событие загрузки playfield (правильный способ для детектирования готовности playfield)
+                // OnPlayfieldLoaded срабатывает когда playfield полностью загружен и готов для операций спавна
+                if (modAPI.Application != null)
+                {
+                    modAPI.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
+                    _logger.Info("✅ Subscribed to IModApi.Application.OnPlayfieldLoaded event");
+                }
+                else
+                {
+                    _logger.Warn("⚠️ IModApi.Application is null - cannot subscribe to OnPlayfieldLoaded");
+                }
             }
             catch (Exception ex)
             {
                 var logger = _logger ?? LogManager.GetCurrentClassLogger();
                 logger.Error(ex, "Error during IMod.Init (extended API initialization)");
+            }
+        }
+
+        /// <summary>
+        /// Обработчик события OnPlayfieldLoaded из IModApi.Application.
+        /// Вызывается когда playfield полностью загружен и готов для операций (спавн структур, и т.д.).
+        /// Это ПРАВИЛЬНОЕ событие для материализации колоний (в отличие от Event_Playfield_Loaded который срабатывает слишком рано).
+        /// </summary>
+        private void OnPlayfieldLoaded(IPlayfield playfield)
+        {
+            try
+            {
+                if (playfield == null)
+                {
+                    _logger?.Warn("OnPlayfieldLoaded: playfield is null");
+                    return;
+                }
+
+                var playfieldName = playfield.Name;
+                _logger?.Info($"🎯 IModApi.OnPlayfieldLoaded: '{playfieldName}' is now READY for spawn operations");
+
+                // Получаем ColonyManager из контейнера для материализации колоний
+                if (_container != null && _container.TryResolve<IColonyManager>(out var colonyManager) && colonyManager != null)
+                {
+                    // Запускаем материализацию виртуальных колоний асинхронно
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfieldName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Error(ex, $"Error ensuring colonies spawned on playfield '{playfieldName}'");
+                        }
+                    });
+                }
+                else
+                {
+                    _logger?.Warn("OnPlayfieldLoaded: ColonyManager not resolved from container");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "Error in OnPlayfieldLoaded handler");
             }
         }
 
@@ -488,6 +544,14 @@ namespace GalacticExpansion
         public void Shutdown()
         {
             _logger?.Info("IMod.Shutdown called");
+            
+            // Отписываемся от события OnPlayfieldLoaded
+            if (_extendedModApi?.Application != null)
+            {
+                _extendedModApi.Application.OnPlayfieldLoaded -= OnPlayfieldLoaded;
+                _logger?.Info("Unsubscribed from IModApi.Application.OnPlayfieldLoaded event");
+            }
+            
             // Используем тот же метод остановки что и Game_Exit
             Game_Exit();
         }

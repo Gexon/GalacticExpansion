@@ -9,23 +9,34 @@
 
 ### 🎯 Виртуализация колоний (Colony Virtualization) — РЕАЛИЗОВАНО ✅
 
-**Проблема:** Колонии не создавались из-за проблемы с событиями игрока и `PlayfieldConnectionNotFound` при немедленном спавне.
+**Проблема:** 
+- Колонии не создавались из-за `PlayfieldConnectionNotFound` при спавне
+- Использовался неправильный API: `Event_Playfield_Loaded` срабатывал слишком рано
+- `Event_Player_ChangedPlayfield` не работает в single-player (баг Empyrion API)
 
-**Решение:** Система виртуализации с retry-логикой материализации:
+**Решение:** 
+- Система виртуализации с правильным API (`IModApi.OnPlayfieldLoaded`)
+- Retry-логика для дополнительной надёжности:
 
 - **Colony модель:**
   - `IsVirtual` (bool) — флаг виртуализации
   - `PendingMaterialization` (bool) — ожидает материализации
   - `MaterializationAttempts` (int) — счетчик попыток материализации
 
+- **ModMain (IModApi Integration):**
+  - `Init(IModApi modAPI)` — подписка на **правильное событие**: `modAPI.Application.OnPlayfieldLoaded`
+  - `OnPlayfieldLoaded(IPlayfield)` — обработчик события, вызывает `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`
+  - **Работает в single-player и на dedicated server** (в отличие от Event_Player_ChangedPlayfield)
+
 - **ColonyTickModule:** при инициализации создаёт **виртуальную колонию** (`CreateInitialVirtualColonyAsync`):
   - Создается сразу при старте мода (не ждет события игрока!)
   - `IsVirtual = true`, `Position = (0,0,0)`, без спавна структур
   - В каждом тике вызывает `TryMaterializePendingColoniesAsync` (retry-логика)
+  - Больше НЕ подписывается на `Event_Playfield_Loaded` (удалён `IEmpyrionGateway` из зависимостей)
 
 - **ColonyManager:**
-  - `EnsurePlayfieldColoniesSpawnedAsync` — при `Event_Playfield_Loaded` помечает виртуальные колонии: `PendingMaterialization = true`
-  - `TryMaterializePendingColoniesAsync` — каждый тик пытается материализовать помеченные колонии (до 10 попыток)
+  - `EnsurePlayfieldColoniesSpawnedAsync` — помечает виртуальные колонии: `PendingMaterialization = true`
+  - `TryMaterializePendingColoniesAsync` — каждый тик пытается материализовать помеченные колонии (до 10 попыток, обычно успех с 1-й)
   - `UpdateColonyAsync` — виртуальные колонии развиваются БЕЗ физических операций со структурами
 
 - **StageManager:**
@@ -44,10 +55,12 @@
 
 **Преимущества виртуализации:**
 1. ✅ Независимость от событий игрока — колония создается сразу при старте
-2. ✅ Решает проблему `PlayfieldConnectionNotFound` через retry-логику
-3. ✅ Экономика и развитие работают непрерывно (виртуально)
-4. ✅ Производительность — нет лишних структур до прихода игрока
-5. ✅ Масштабируемость — можно создавать множество виртуальных колоний
+2. ✅ **Правильный API** — `IModApi.OnPlayfieldLoaded` гарантирует готовность playfield
+3. ✅ **Работает везде** — single-player и dedicated server (нет зависимости от багнутого Event_Player_ChangedPlayfield)
+4. ✅ Решает проблему `PlayfieldConnectionNotFound` через правильное событие + retry-логику
+5. ✅ Экономика и развитие работают непрерывно (виртуально)
+6. ✅ Производительность — нет лишних структур до прихода игрока
+7. ✅ Масштабируемость — можно создавать множество виртуальных колоний
 
 **Документация:** `docs/architecture/11_Colony_Virtualization.md`
 

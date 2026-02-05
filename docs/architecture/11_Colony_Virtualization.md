@@ -75,15 +75,16 @@ Colony {Id}: Transitioning from LandingPending to Base1 [VIRTUAL]
 
 Материализация происходит в два этапа для решения проблемы `PlayfieldConnectionNotFound`:
 
-#### Этап 1: Пометка для материализации (Event_Playfield_Loaded)
+#### Этап 1: Пометка для материализации (IModApi.OnPlayfieldLoaded)
 
-При загрузке playfield (`Event_Playfield_Loaded`) вызывается `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`:
+При загрузке playfield через событие `IModApi.Application.OnPlayfieldLoaded` вызывается `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`:
 
-1. **Проверка виртуальности**: Если `colony.IsVirtual == true`
-2. **Пометка для отложенного спавна**: 
+1. **Правильное событие**: `IModApi.OnPlayfieldLoaded` срабатывает когда playfield **полностью готов** для операций спавна (в отличие от `Event_Playfield_Loaded` который срабатывает слишком рано)
+2. **Проверка виртуальности**: Если `colony.IsVirtual == true`
+3. **Пометка для отложенного спавна**: 
    - `colony.PendingMaterialization = true`
    - `colony.MaterializationAttempts = 0`
-3. **Без немедленного спавна** - playfield еще не готов!
+4. **Без немедленного спавна** - используем retry-логику для надёжности
 
 #### Этап 2: Retry-логика материализации (каждый тик)
 
@@ -309,7 +310,8 @@ public class Colony
 Task<Colony> CreateColonyAsync(string playfield, Vector3 position, int factionId, bool isVirtual = false);
 
 /// <summary>
-/// При загрузке playfield: помечает виртуальные колонии для материализации (отложенный спавн).
+/// При загрузке playfield (через IModApi.OnPlayfieldLoaded): 
+/// помечает виртуальные колонии для материализации (отложенный спавн).
 /// </summary>
 Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
 
@@ -318,6 +320,29 @@ Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
 /// Вызывается каждый тик. Повторяет попытки до 10 раз при ошибке PlayfieldConnectionNotFound.
 /// </summary>
 Task TryMaterializePendingColoniesAsync();
+```
+
+### ModMain (IModApi Integration)
+
+```csharp
+// В IMod.Init(IModApi modAPI)
+public void Init(IModApi modAPI)
+{
+    _extendedModApi = modAPI;
+    
+    // Подписка на правильное событие загрузки playfield
+    modAPI.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
+}
+
+// Обработчик события
+private void OnPlayfieldLoaded(IPlayfield playfield)
+{
+    var playfieldName = playfield.Name;
+    
+    // Получаем ColonyManager и запускаем материализацию
+    var colonyManager = _container.Resolve<IColonyManager>();
+    _ = Task.Run(() => colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfieldName));
+}
 ```
 
 ### IStageManager
@@ -473,23 +498,20 @@ DEBUG | ColonyManager: updating colony abc123 (Temperate Planet, stage=Base1, dt
 INFO  | Colony abc123: Transitioning from LandingPending to Base1 [VIRTUAL]
 ```
 
-### Материализация (с retry-логикой)
+### Материализация (через IModApi.OnPlayfieldLoaded)
 ```
-# Пометка при загрузке playfield
-INFO  | ColonyTickModule: Playfield_Loaded 'Temperate Planet' — ensuring colonies on playfield
+# Событие загрузки playfield (IModApi)
+INFO  | 🎯 IModApi.OnPlayfieldLoaded: 'Temperate Planet' is now READY for spawn operations
 INFO  | EnsurePlayfieldColoniesSpawned: playfield 'Temperate Planet', 1 colony(ies)
 INFO  | Virtual colony abc123 marked for materialization (will retry in next ticks)
 
-# Retry-попытки (каждый тик)
+# Retry-попытки (обычно успех с первой попытки)
 DEBUG | TryMaterializePendingColonies: 1 colony(ies) pending materialization
 DEBUG | Attempting to materialize colony abc123 (attempt 1/10)
-DEBUG | Materialization attempt 1 failed for colony abc123: PlayfieldConnectionNotFound
-
-DEBUG | Attempting to materialize colony abc123 (attempt 2/10)
 INFO  | Materializing virtual colony abc123 on 'Temperate Planet'...
 INFO  | Found suitable location for colony abc123 at (1234.5, 100.0, -567.8)
 INFO  | Colony abc123 materialized successfully with structure 42 at (1234.5, 100.0, -567.8)
-INFO  | ✅ Colony abc123 materialized successfully on attempt 2
+INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 ```
 
 ---
@@ -508,20 +530,34 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 2
 
 ### Зачем нужна retry-логика?
 
-Проблема `PlayfieldConnectionNotFound` возникает, когда playfield загружен (`Event_Playfield_Loaded`), но еще **не полностью готов** к операциям спавна структур через ModAPI.
+Хотя `IModApi.OnPlayfieldLoaded` срабатывает когда playfield готов, мы используем retry-логику для дополнительной надёжности и обработки edge-cases.
+
+### Исправление проблемы PlayfieldConnectionNotFound
+
+**Старый подход (❌ НЕ работал):**
+- Использовался `Event_Playfield_Loaded` (через `CmdId.Event_Playfield_Loaded`)
+- Срабатывал **слишком рано** - playfield начинал загружаться, но не был готов для спавна
+- **Single-player проблема:** `Event_Player_ChangedPlayfield` не срабатывает в single-player режиме (баг Empyrion API)
+- Результат: все попытки спавна провалились с `PlayfieldConnectionNotFound`
+
+**Новый подход (✅ РАБОТАЕТ):**
+- Используется `IModApi.Application.OnPlayfieldLoaded` (расширенный API)
+- Срабатывает когда playfield **полностью готов** для всех операций
+- **Работает в single-player и на dedicated server**
+- Retry-логика нужна только для edge-cases и дополнительной надёжности
 
 ### Как работает retry-логика?
 
-1. **При Event_Playfield_Loaded:**
-   - Колония НЕ материализуется немедленно
-   - Только помечается: `PendingMaterialization = true`
+1. **При IModApi.OnPlayfieldLoaded:**
+   - Playfield гарантированно готов, но мы всё равно помечаем колонию: `PendingMaterialization = true`
+   - Это даёт дополнительную защиту от race conditions
 
 2. **Каждый тик симуляции (1 раз в секунду):**
    - `TryMaterializePendingColoniesAsync` проверяет помеченные колонии
    - Пытается материализовать каждую (до 10 попыток)
    - При успехе — сбрасывает флаги и счетчик
 
-3. **При неудаче:**
+3. **При неудаче (редко):**
    - `MaterializationAttempts++`
    - Логируется попытка (DEBUG уровень)
    - Повтор в следующем тике
@@ -535,6 +571,7 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 2
 - **Максимум попыток:** 10
 - **Интервал между попытками:** 1 секунда (частота тика симуляции)
 - **Общее время ожидания:** до 10 секунд
+- **Ожидаемые попытки:** 1-2 (playfield уже готов после OnPlayfieldLoaded)
 
 ## Известные ограничения
 
