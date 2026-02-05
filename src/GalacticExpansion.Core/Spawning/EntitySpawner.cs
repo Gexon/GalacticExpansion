@@ -39,30 +39,34 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Спавнит структуру по имени префаба в заданной позиции с ротацией и фракцией.
+        /// КРИТИЧНО: playfield ОБЯЗАТЕЛЕН для правильной работы spawn в Empyrion multi-process архитектуре!
         /// </summary>
+        /// <param name="playfield">Название playfield (ОБЯЗАТЕЛЬНО!).</param>
         /// <param name="prefabName">Имя префаба структуры.</param>
         /// <param name="position">Позиция (X, Y, Z).</param>
         /// <param name="rotation">Ротация.</param>
         /// <param name="factionId">Идентификатор фракции.</param>
         /// <returns>EntityId созданной структуры.</returns>
-        public async Task<int> SpawnStructureAsync(string prefabName, Vector3 position, Vector3 rotation, int factionId)
+        public async Task<int> SpawnStructureAsync(string playfield, string prefabName, Vector3 position, Vector3 rotation, int factionId)
         {
+            if (string.IsNullOrEmpty(playfield))
+                throw new ArgumentException("Playfield cannot be empty", nameof(playfield));
             if (string.IsNullOrEmpty(prefabName))
                 throw new ArgumentException("Prefab name cannot be empty", nameof(prefabName));
 
-            _logger.Info($"Spawning structure '{prefabName}' at {position} (rotation={rotation}, faction={factionId})");
+            _logger.Info($"Spawning structure '{prefabName}' at {position} on playfield '{playfield}' (rotation={rotation}, faction={factionId})");
 
             try
             {
                 var entityType = GetEntityTypeFromPrefab(prefabName);
                 var spawnInfo = new EntitySpawnInfo
                 {
+                    playfield = playfield, // КРИТИЧНО: указываем playfield для spawn
                     prefabName = prefabName,
                     type = (byte)entityType,
                     pos = new PVector3(position.X, position.Y, position.Z),
                     rot = new PVector3(rotation.X, rotation.Y, rotation.Z),
-                    factionGroup = (byte)factionId,
-                    factionId = (byte)factionId
+                    factionId = factionId // int, не byte! factionGroup не трогаем (используется только если factionId = -1)
                 };
 
                 var entityId = await _gateway.SendRequestAsync<int>(CmdId.Request_Entity_Spawn, spawnInfo,
@@ -85,12 +89,12 @@ namespace GalacticExpansion.Core.Spawning
                     var entityType = GetEntityTypeFromPrefab(prefabName);
                     var spawnInfo = new EntitySpawnInfo
                     {
+                        playfield = playfield, // КРИТИЧНО: указываем playfield для retry
                         prefabName = prefabName,
                         type = (byte)entityType,
                         pos = new PVector3(position.X, position.Y, position.Z),
                         rot = new PVector3(rotation.X, rotation.Y, rotation.Z),
-                        factionGroup = (byte)factionId,
-                        factionId = (byte)factionId
+                        factionId = factionId // int, не byte!
                     };
 
                     var entityId = await _gateway.SendRequestAsync<int>(CmdId.Request_Entity_Spawn, spawnInfo,
@@ -144,7 +148,7 @@ namespace GalacticExpansion.Core.Spawning
             try
             {
                 var terrainPosition = await _placementResolver.FindLocationAtTerrainAsync(playfield, x, z, heightOffset);
-                return await SpawnStructureAsync(prefabName, terrainPosition, new Vector3(), factionId);
+                return await SpawnStructureAsync(playfield, prefabName, terrainPosition, new Vector3(), factionId);
             }
             catch (Exception ex)
             {
@@ -229,13 +233,15 @@ namespace GalacticExpansion.Core.Spawning
             {
                 var spawnPos = await _placementResolver.FindLocationAtTerrainAsync(playfield, x, z, 0.5f);
 
+                // Для NPC используем entityTypeName вместо prefabName/type
+                // factionName не используется т.к. factionId принимает int (TODO: добавить mapping если нужно)
                 var spawnInfo = new EntitySpawnInfo
                 {
-                    prefabName = npcClassName,
-                    type = 8, // NPC type
+                    playfield = playfield, // КРИТИЧНО: указываем playfield для NPC spawn
+                    entityTypeName = npcClassName, // Для NPC: строка вида 'ZiraxMale', 'AlienCivilian' и т.д.
                     pos = new PVector3(spawnPos.X, spawnPos.Y, spawnPos.Z),
-                    rot = new PVector3(),
-                    name = factionName
+                    rot = new PVector3(0, 0, 0)
+                    // factionId можно установить если известен int ID фракции (сейчас у нас только string factionName)
                 };
 
                 var entityId = await _gateway.SendRequestAsync<int>(CmdId.Request_Entity_Spawn, spawnInfo,

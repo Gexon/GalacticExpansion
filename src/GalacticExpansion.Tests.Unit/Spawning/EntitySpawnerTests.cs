@@ -68,13 +68,14 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task SpawnStructureAsync_SpawnsStructure_Successfully()
         {
             // Arrange
+            var playfield = "Temperate Planet";
             var prefabName = "GLEX_Base_L1";
             var position = new Vector3(1000, 100, -500);
             var rotation = new Vector3();
             var factionId = 2;
 
             // Act
-            var entityId = await _spawner.SpawnStructureAsync(prefabName, position, rotation, factionId);
+            var entityId = await _spawner.SpawnStructureAsync(playfield, prefabName, position, rotation, factionId);
 
             // Assert
             Assert.Equal(12345, entityId);
@@ -93,7 +94,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         {
             // Act & Assert
             await Assert.ThrowsAsync<ArgumentException>(
-                () => _spawner.SpawnStructureAsync("", new Vector3(), new Vector3(), 2)
+                () => _spawner.SpawnStructureAsync("Temperate Planet", "", new Vector3(), new Vector3(), 2)
             );
         }
 
@@ -110,7 +111,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
 
             // Act & Assert
             var exception = await Assert.ThrowsAsync<SpawnException>(
-                () => _spawner.SpawnStructureAsync("TestPrefab", new Vector3(), new Vector3(), 2)
+                () => _spawner.SpawnStructureAsync("Temperate Planet", "TestPrefab", new Vector3(), new Vector3(), 2)
             );
 
             Assert.Contains("invalid EntityId", exception.Message);
@@ -136,7 +137,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 });
 
             // Act
-            var entityId = await _spawner.SpawnStructureAsync("TestPrefab", new Vector3(), new Vector3(), 2);
+            var entityId = await _spawner.SpawnStructureAsync("Temperate Planet", "TestPrefab", new Vector3(), new Vector3(), 2);
 
             // Assert
             Assert.Equal(12345, entityId);

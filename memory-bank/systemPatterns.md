@@ -44,11 +44,14 @@
    - `IsVirtual = true`, без физических структур
    - Развивается в БД: ресурсы, юниты, переходы стадий
 
-2. **Материализация** (Event_Playfield_Loaded + retry):
-   - Событие `CmdId.Event_Playfield_Loaded` → пометка `PendingMaterialization = true`
-   - Каждый тик: `TryMaterializePendingColoniesAsync` (до 10 попыток)
-   - При успехе: спавн структур, `IsVirtual = false`
-   - Решает проблему `PlayfieldConnectionNotFound` (playfield еще не готов)
+2. **Материализация** (из Game_Update в PfServer процессе):
+   - Событие `CmdId.Event_Playfield_Loaded` → пометка `PendingMaterialization = true`, `MaterializationAttempts = 0`
+   - **ModMain.Game_Update()** вызывает `TryMaterializePendingColoniesAsync` каждый tick
+   - Активная проверка готовности: `IsPlayfieldReadyAsync` через `Request_Playfield_Stats` (timeout 2с)
+   - Если плейфилд НЕ готов → повтор в следующем Game_Update (~1 секунда)
+   - Если плейфилд готов → попытка материализации (до 100 попыток)
+   - При успехе: спавн структур с **обязательным** заполнением `EntitySpawnInfo.playfield`, `IsVirtual = false`
+   - Решает проблему `PlayfieldConnectionNotFound` через вызов из правильного процесса (PfServer) и проверку готовности
 
 3. **EnsurePlayfieldColoniesSpawnedAsync:**
    - Помечает виртуальные колонии для материализации
@@ -64,4 +67,6 @@
 4. Спавн структур и NPC идет через `IEntitySpawner`.
 5. Переходы стадий всегда сопровождаются синхронизацией state.
 6. **Виртуальные колонии:** физические операции (спавн, Touch, destroy) запрещены; только обновление моделей в БД.
-7. **Материализация:** обязательно через retry-логику (до 10 попыток) для решения `PlayfieldConnectionNotFound`.
+7. **Материализация:** ОБЯЗАТЕЛЬНО из `ModMain.Game_Update()` (PfServer процесс) + активная проверка готовности (`Request_Playfield_Stats`) + retry до 100 попыток.
+8. **Multi-process архитектура:** Spawn работает только из PfServer процесса (где есть playfield connection). SimulationEngine в Dedi процессе → PlayfieldConnectionNotFound.
+9. **EntitySpawnInfo.playfield:** ОБЯЗАТЕЛЬНО заполнять для правильного spawn на целевом playfield в multi-process среде.

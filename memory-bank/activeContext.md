@@ -15,29 +15,39 @@
 - `Event_Player_ChangedPlayfield` не работает в single-player (баг Empyrion API)
 
 **Решение:** 
-- Система виртуализации с правильным API (`IModApi.OnPlayfieldLoaded`)
-- Retry-логика для дополнительной надёжности:
+- Система виртуализации с материализацией из `Game_Update()` в PfServer процессе
+- Решает проблему многопроцессной архитектуры Empyrion (Dedi vs PfServer)
 
 - **Colony модель:**
   - `IsVirtual` (bool) — флаг виртуализации
   - `PendingMaterialization` (bool) — ожидает материализации
   - `MaterializationAttempts` (int) — счетчик попыток материализации
 
-- **ModMain (IModApi Integration):**
-  - `Init(IModApi modAPI)` — подписка на **правильное событие**: `modAPI.Application.OnPlayfieldLoaded`
-  - `OnPlayfieldLoaded(IPlayfield)` — обработчик события, вызывает `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`
-  - **Работает в single-player и на dedicated server** (в отличие от Event_Player_ChangedPlayfield)
-
-- **ColonyTickModule:** при инициализации создаёт **виртуальную колонию** (`CreateInitialVirtualColonyAsync`):
+- **ColonyTickModule:** 
+  - При инициализации создаёт **виртуальную колонию** (`CreateInitialVirtualColonyAsync`)
   - Создается сразу при старте мода (не ждет события игрока!)
   - `IsVirtual = true`, `Position = (0,0,0)`, без спавна структур
-  - В каждом тике вызывает `TryMaterializePendingColoniesAsync` (retry-логика)
-  - Больше НЕ подписывается на `Event_Playfield_Loaded` (удалён `IEmpyrionGateway` из зависимостей)
+  - Подписывается на `Event_Playfield_Loaded` через `IEmpyrionGateway`
+  - **НЕ вызывает** `TryMaterializePendingColoniesAsync` (это теперь в Game_Update)
+
+- **ModMain.Game_Update():**
+  - КРИТИЧНО: материализация вызывается отсюда (правильный поток для spawn в PfServer)
+  - Каждый game tick вызывает `_colonyManager.TryMaterializePendingColoniesAsync()`
+  - Это гарантирует выполнение в контексте с playfield connection
 
 - **ColonyManager:**
-  - `EnsurePlayfieldColoniesSpawnedAsync` — помечает виртуальные колонии: `PendingMaterialization = true`
-  - `TryMaterializePendingColoniesAsync` — каждый тик пытается материализовать помеченные колонии (до 10 попыток, обычно успех с 1-й)
+  - Имеет `IEmpyrionGateway` для проверки готовности плейфилдов
+  - `EnsurePlayfieldColoniesSpawnedAsync` — помечает виртуальные колонии: `PendingMaterialization = true`, `MaterializationAttempts = 0`
+  - `TryMaterializePendingColoniesAsync` — вызывается из Game_Update (до 100 попыток):
+    - `IsPlayfieldReadyAsync` — проверяет готовность через `Request_Playfield_Stats` (timeout 2с)
+    - Если плейфилд НЕ готов → повтор в следующем Game_Update (~1 секунда)
+    - Если плейфилд готов → попытка материализации
+    - При ошибке материализации → повтор в следующем Game_Update
   - `UpdateColonyAsync` — виртуальные колонии развиваются БЕЗ физических операций со структурами
+
+- **EntitySpawner:**
+  - `SpawnStructureAsync` — ОБЯЗАТЕЛЬНО передаём `playfield` в `EntitySpawnInfo.playfield`
+  - Без этого поля spawn может пойти не на тот playfield или упасть
 
 - **StageManager:**
   - `InitializeColonyAsync` — поддержка параметра `isVirtual`, спавн только для материализованных
@@ -55,12 +65,13 @@
 
 **Преимущества виртуализации:**
 1. ✅ Независимость от событий игрока — колония создается сразу при старте
-2. ✅ **Правильный API** — `IModApi.OnPlayfieldLoaded` гарантирует готовность playfield
-3. ✅ **Работает везде** — single-player и dedicated server (нет зависимости от багнутого Event_Player_ChangedPlayfield)
-4. ✅ Решает проблему `PlayfieldConnectionNotFound` через правильное событие + retry-логику
-5. ✅ Экономика и развитие работают непрерывно (виртуально)
-6. ✅ Производительность — нет лишних структур до прихода игрока
-7. ✅ Масштабируемость — можно создавать множество виртуальных колоний
+2. ✅ **Правильный процесс** — материализация из Game_Update() в PfServer процессе (есть playfield connection)
+3. ✅ **Request_Playfield_Stats** — надёжная проверка готовности (до 100 попыток)
+4. ✅ **EntitySpawnInfo.playfield** — правильное указание целевого playfield
+5. ✅ **Работает везде** — local dedicated и dedicated server
+6. ✅ Экономика и развитие работают непрерывно (виртуально)
+7. ✅ Производительность — нет лишних структур до прихода игрока
+8. ✅ Масштабируемость — можно создавать множество виртуальных колоний
 
 **Документация:** `docs/architecture/11_Colony_Virtualization.md`
 

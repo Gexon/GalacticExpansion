@@ -327,6 +327,7 @@ namespace GalacticExpansion.Tests.Integration
             );
 
             var colonyManager = new ColonyManager(
+                _gatewayMock.Object,
                 stageManager,
                 economySimulator,
                 unitEconomy,
@@ -536,6 +537,7 @@ namespace GalacticExpansion.Tests.Integration
             );
 
             var colonyManager = new ColonyManager(
+                _gatewayMock.Object,
                 stageManager,
                 economySimulator,
                 unitEconomy,

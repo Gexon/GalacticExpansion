@@ -1,0 +1,38 @@
+Info.yaml
+
+Your mod's name will display in the log files
+
+Name: ModNameGoesHere
+
+
+I have no idea what this line is for
+
+Description: test mod
+
+
+I have no idea what this line is for
+
+Author: MyName
+
+
+This line shows up in the log files
+
+Version: 0.0.0
+
+
+I have no idea what this line is for
+
+Website: duckduckgo.com
+
+
+This line is important, it tells the server which processes should load the mod
+
+Dedi = Dedicated server Main process, handles things like Chat messages and API1
+
+PfServer = Playfield process handles things like Entity info, spawning
+
+Client = Used for Single player mods. As far as I can tell, everything in ClientPlayfield only works in Single Player
+
+to get your mod to communicate between the different processes you can use the INetwork interface.
+
+ModTargets: Dedi, PfServer, Client

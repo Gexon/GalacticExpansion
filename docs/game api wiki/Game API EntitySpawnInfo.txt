@@ -1,0 +1,86 @@
+Game API EntitySpawnInfo
+
+Index: GameAPI > CmdId
+Contents
+
+    1 EntitySpawnInfo
+        1.1 Properties
+            1.1.1 public int forceEntityId
+            1.1.2 public string playfield
+            1.1.3 public PVector3 pos
+            1.1.4 public PVector3 rot
+            1.1.5 public string name
+            1.1.6 public byte type
+            1.1.7 public string entityTypeName
+            1.1.8 public string prefabName
+            1.1.9 public string prefabDir
+            1.1.10 public byte factionGroup
+            1.1.11 public int factionId
+            1.1.12 public string exportedEntityDat
+
+EntitySpawnInfo
+
+Class containing information to spawn an info from.
+Properties
+public int forceEntityId
+
+Set the entitys spawnid to this value. ID should be invoked from: Request_NewEntityId
+public string playfield
+
+The playfield you wish to spawn it on.
+public PVector3 pos
+
+The x,y,z to spawn it at.
+public PVector3 rot
+
+The x,y,z rotation to face
+public string name
+
+The name for the spawned structure (What is displayed ingame)
+public byte type
+
+Type of the spawn : Undef = 0, BA = 2, CV = 3, SV = 4, HV = 5, AstVoxel = 7. use this OR 'entityTypeName'
+public string entityTypeName
+
+String for an entity to spawn (for instance 'ZiraxMale', 'AlienCivilian1Fat', etc). use this OR 'type'
+public string prefabName
+
+The prefabname to spawn it from. Note that this must be the name WITHOUT any extension (For instance, if file is called 'AlienWall.epb' you would specify 'AlienWall'
+public string prefabDir
+
+If the prefab is located inside a directory (Not in /prefab/ root), you may specify this tag. Note, that it must be full! path:
+
+For example: If folder is called 'CCImported', path might look like this: D:\APPS\steamapps\common\Empyrion - Dedicated Server\Content\Prefabs\CCImported\
+public byte factionGroup
+
+What factiongroup to have the spawn belong to.
+
+If using factiongroups, you will most likely want to use 'factionId' as -1.
+
+Faction = 0
+
+Private = 1
+
+Alien = 2
+
+Predator = 3
+
+Prey = 4
+
+Admin = 5
+
+Unknown = 11
+
+[Public] = 10
+
+None = 12
+
+Decored = 255
+public int factionId
+
+The ID of the faction that owns this
+public string exportedEntityDat
+
+optional: file path of an exported entity dat file.
+
+remark: the values above will override the imported data from the .dat file, but you can null/0 these to avoid this. 

@@ -1,0 +1,51 @@
+Game API IModAPI
+
+Index: GameAPI
+
+Single player mods only(?)
+
+       IPlayfield ClientPlayfield { get; set; }
+
+For transferring data between the processes (Dedicated, Playfield, Client)
+
+       INetwork Network { get; }
+
+for accessing GUI elements like the alert, pop-up textbox (cannot access ItemExchange window)
+
+       IGui GUI { get; }
+
+for doing things with the PDA?
+
+       IPda PDA { get; set; }
+
+for running scripts?
+
+       IScript Scripting { get; }
+
+for playing sounds?
+
+       ISoundPlayer SoundPlayer { get; }
+
+Lots of useful features in here...
+
+       IApplication Application { get; }
+
+Events
+
+Triggered on game events (most of this is disabled in multiplayer?)
+
+       event GameEventDelegate GameEvent;
+
+Logging
+
+log to Eleon's log file
+
+       void Log(string text);
+
+log to Eleon's log file
+
+       void LogError(string text);
+
+log to Eleon's log file
+
+       void LogWarning(string text);

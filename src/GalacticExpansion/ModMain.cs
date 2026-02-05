@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Eleon.Modding;
 using GalacticExpansion.Core.Economy;
 using GalacticExpansion.Core.Gateway;
+using GalacticExpansion.Core.IPC;
 using GalacticExpansion.Core.Placement;
 using GalacticExpansion.Core.Simulation;
 using GalacticExpansion.Core.Spawning;
@@ -31,16 +32,24 @@ namespace GalacticExpansion
     public class ModMain : ModInterface, IMod
     {
         private static ILogger? _logger;
+        private static string? _processPrefix; // Префикс процесса для логов [Dedi-PID] или [PfServer-PID]
         private ServiceContainer? _container;
         private IEmpyrionGateway? _gateway;
         private IStateStore? _stateStore;
         private ISimulationEngine? _simulationEngine;
+        private IColonyManager? _colonyManager; // Для материализации в Dedi процессе
         private SimulationState? _currentState;
         private Configuration? _config;
         private ModGameAPI? _modApi;
         private IModApi? _extendedModApi; // Расширенный API (IMod.Init) для доступа к IApplication и IPlayfield
         
+        // IPC для multi-process архитектуры (Dedi <-> PfServer коммуникация)
+        private NetworkBridge? _networkBridge;
+        private ApplicationMode _processMode;
+        private string? _currentPlayfield; // Для PfServer процесса - название плейфилда
+        
         private DateTime _lastBackupTime;
+        private DateTime _lastMaterializationAttempt = DateTime.MinValue; // Для throttling материализации (Dedi)
         private bool _isInitialized = false; // Флаг инициализации
 
         /// <summary>
@@ -81,6 +90,13 @@ namespace GalacticExpansion
                 // Сохраняем ссылку на ModGameAPI
                 _modApi = dediAPI;
 
+                // Проверка: если dediAPI null, это single-player или клиент
+                if (_modApi == null)
+                {
+                    _logger.Warn("Game_Start called with null ModGameAPI - likely single-player or client mode");
+                    _logger.Warn("Mod will use IModApi from IMod.Init instead");
+                }
+
                 // 3. Загружаем конфигурацию
                 _logger.Info("Loading configuration...");
                 var configLoader = new ConfigurationLoader(modPath);
@@ -93,25 +109,44 @@ namespace GalacticExpansion
                 _logger.Info("Setting up dependency injection...");
                 _container = new ServiceContainer();
                 
-                // Регистрируем логгер
+                // Регистрируем логгер и конфигурацию
                 _container.Register<ILogger>(_logger!);
-                _container.Register<ModGameAPI>(_modApi);
                 _container.Register<Configuration>(_config);
+                
+                // Регистрируем ModGameAPI только если доступен
+                if (_modApi != null)
+                {
+                    _container.Register<ModGameAPI>(_modApi);
+                }
 
-                // 5. Инициализируем Gateway
-                _logger.Info("Initializing Empyrion Gateway...");
-                _gateway = new EmpyrionGateway(
-                    _modApi, 
-                    _config.Limits.MaxRequestsPerSecond
-                );
-                _container.Register<IEmpyrionGateway>(_gateway);
-                _gateway.Start();
-                _logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
+                // 5. Инициализируем Gateway (только если ModGameAPI доступен)
+                if (_modApi != null)
+                {
+                    _logger.Info("Initializing Empyrion Gateway...");
+                    _gateway = new EmpyrionGateway(
+                        _modApi, 
+                        _config.Limits.MaxRequestsPerSecond
+                    );
+                    _container.Register<IEmpyrionGateway>(_gateway);
+                    _gateway.Start();
+                    _logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
+                }
+                else
+                {
+                    _logger.Warn("Skipping Gateway initialization - will initialize in IMod.Init with IModApi");
+                }
 
                 // 6. Инициализируем StateStore
                 _logger.Info("Initializing State Store...");
                 _stateStore = new StateStore(modPath);
                 _container.Register<IStateStore>(_stateStore);
+
+                // Если Gateway не инициализирован (single-player), отложим полную инициализацию до IMod.Init
+                if (_gateway == null)
+                {
+                    _logger.Info("Deferred initialization mode - waiting for IMod.Init with IModApi");
+                    return; // Выходим из Game_Start, продолжим в Init()
+                }
 
                 // 7. Инициализируем Phase 2/3: Core Loop и доменные компоненты
                 _logger.Info("Initializing Phase 2/3 components...");
@@ -190,21 +225,22 @@ namespace GalacticExpansion
                 _container.Register<IStageManager>(stageManager);
                 _logger.Info("StageManager registered");
                 
-                // ColonyManager - координация модулей
+                // ColonyManager - координация модулей (сохраняем для вызова из Game_Update)
                 var colonyManager = new ColonyManager(
+                    _gateway,
                     stageManager,
                     economySimulator,
                     unitEconomyManager,
                     _stateStore,
                     _logger
                 );
+                _colonyManager = colonyManager;
                 // ColonyManager не является модулем симуляции, только координатором
                 _container.Register<IColonyManager>(colonyManager);
                 _logger.Info("ColonyManager registered");
 
-                // ColonyTickModule — обновление колоний по тику и создание первой виртуальной колонии.
-                // Материализация виртуальных колоний происходит через IModApi.OnPlayfieldLoaded (обрабатывается в IMod.Init).
-                var colonyTickModule = new ColonyTickModule(colonyManager, placementResolver, eventBus, _config, _logger);
+                // ColonyTickModule — обновление колоний по тику и материализация при Event_Playfield_Loaded с задержкой.
+                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
                 _simulationEngine.RegisterModule(colonyTickModule);
                 _logger.Info("ColonyTickModule registered");
                 
@@ -250,7 +286,27 @@ namespace GalacticExpansion
         {
             try
             {
-                // Передаем событие в Gateway для обработки
+                // КРИТИЧЕСКИ ВАЖНО для PfServer: Event_Playfield_Loaded сообщает о loaded playfield
+                // Используем это событие для завершения инициализации NetworkBridge в PfServer процессе
+                if (_processMode == ApplicationMode.PlayfieldServer && eventId == CmdId.Event_Playfield_Loaded)
+                {
+                    if (data is PlayfieldLoad pfLoad && !string.IsNullOrEmpty(pfLoad.playfield))
+                    {
+                        _logger?.Info($"[PfServer] Event_Playfield_Loaded: {pfLoad.playfield}");
+                        
+                        // Устанавливаем текущий playfield
+                        _currentPlayfield = pfLoad.playfield;
+                        
+                        // Завершаем инициализацию NetworkBridge (теперь знаем playfield name)
+                        if (_networkBridge != null && !string.IsNullOrEmpty(_currentPlayfield))
+                        {
+                            _networkBridge.InitializeForPlayfieldServer(_currentPlayfield);
+                            _logger?.Info($"✅ [PfServer] NetworkBridge fully initialized for '{_currentPlayfield}'");
+                        }
+                    }
+                }
+
+                // Передаем событие в Gateway для обработки (если Gateway инициализирован)
                 _gateway?.HandleEvent(eventId, seqNr, data);
             }
             catch (Exception ex)
@@ -260,32 +316,56 @@ namespace GalacticExpansion
         }
 
         /// <summary>
-        /// Обновление симуляции.
-        /// Вызывается каждый тик сервера.
-        /// В Phase 3 SimulationEngine управляет основным циклом через собственный таймер.
-        /// Здесь остается только периодическое создание бэкапов.
+        /// Обновление мода на каждом game tick.
+        /// КРИТИЧЕСКИ ВАЖНО: Game_Update вызывается в ОБОИХ процессах (Dedi и PfServer).
+        ///
+        /// В Dedi процессе:
+        /// - Материализация виртуальных колоний через IPC (отправка команд в PfServer)
+        /// - Периодические бэкапы состояния
+        /// 
+        /// В PfServer процессе:
+        /// - Минимальная логика (IPC команды обрабатываются асинхронно через NetworkBridge)
         /// </summary>
         public void Game_Update()
         {
             try
             {
-                if (_config == null || _stateStore == null)
+                if (!_isInitialized)
                     return;
 
-                var now = DateTime.UtcNow;
-
-                // Создание периодических бэкапов
-                if ((now - _lastBackupTime).TotalHours >= _config.Simulation.StateBackupIntervalHours)
+                // РАЗНАЯ ЛОГИКА для разных процессов
+                if (_processMode == ApplicationMode.DedicatedServer)
                 {
-                    _logger?.Info("Creating periodic backup...");
-                    _stateStore.CreateBackupAsync().Wait();
-                    _stateStore.CleanupOldBackupsAsync(_config.Simulation.KeepBackupCount).Wait();
-                    _lastBackupTime = now;
+                    // ==== DEDI ПРОЦЕСС ====
+                    
+                    // ВАЖНО: Материализация виртуальных колоний теперь происходит через IPC!
+                    // ColonyManager → StageManager → IPCEntitySpawner → NetworkBridge → PfServer
+                    // Вызов идет из ColonyTickModule в SimulationEngine (событие Event_Playfield_Loaded)
+                    // Здесь НЕ нужно вызывать TryMaterializePendingColoniesAsync т.к. это происходит автоматически!
+                    
+                    // Периодические бэкапы (только в Dedi)
+                    if (_config != null && _stateStore != null)
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - _lastBackupTime).TotalHours >= _config.Simulation.StateBackupIntervalHours)
+                        {
+                            _logger?.Info("[Dedi] Creating periodic backup...");
+                            _stateStore.CreateBackupAsync().Wait();
+                            _stateStore.CleanupOldBackupsAsync(_config.Simulation.KeepBackupCount).Wait();
+                            _lastBackupTime = now;
+                        }
+                    }
+                }
+                else if (_processMode == ApplicationMode.PlayfieldServer)
+                {
+                    // ==== PFSERVER ПРОЦЕСС ====
+                    // Минимальная логика - IPC обрабатывается асинхронно через NetworkBridge callbacks
+                    // Spawn операции выполняются в HandleIPCRequestAsync по запросам от Dedi
                 }
             }
             catch (Exception ex)
             {
-                _logger?.Error(ex, "Error in Game_Update");
+                _logger?.Error(ex, $"[{_processMode}] Error in Game_Update");
             }
         }
 
@@ -366,11 +446,22 @@ namespace GalacticExpansion
         /// NLog не может автоматически найти конфиг, потому что мод загружается из Content/Mods/,
         /// но AppDomain.CurrentDomain.BaseDirectory указывает на DedicatedServer\.
         /// Поэтому нужно явно указать путь к NLog.config в папке мода.
+        /// 
+        /// Также определяет процесс (Dedi/PfServer) для префикса в логах.
         /// </summary>
         private void InitializeLogging()
         {
             try
             {
+                // Определяем тип процесса для логов (Dedi vs PfServer)
+                var processId = System.Diagnostics.Process.GetCurrentProcess().Id;
+                var commandLine = Environment.CommandLine.ToLowerInvariant();
+                var processType = commandLine.Contains("-playfieldserver") ? "PfServer" : "Dedi";
+                _processPrefix = $"[{processType}-{processId}]";
+
+                // Устанавливаем в GlobalDiagnosticsContext для использования в NLog layout
+                NLog.GlobalDiagnosticsContext.Set("process", _processPrefix);
+
                 // Определяем путь к папке мода
                 // AppDomain.CurrentDomain.BaseDirectory = "D:\...\DedicatedServer\"
                 var baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -389,7 +480,7 @@ namespace GalacticExpansion
                     var config = new LoggingConfiguration();
                     var consoleTarget = new NLog.Targets.ConsoleTarget("console")
                     {
-                        Layout = "${time}|${level:uppercase=true:truncate=5}|${logger:shortName=true}|${message}"
+                        Layout = "${time}|${level:uppercase=true:truncate=5}|${logger:shortName=true}|${gdc:item=process}|${message}"
                     };
                     config.AddRule(LogLevel.Debug, LogLevel.Fatal, consoleTarget);
                     LogManager.Configuration = config;
@@ -406,7 +497,7 @@ namespace GalacticExpansion
                 var config = new LoggingConfiguration();
                 var consoleTarget = new NLog.Targets.ConsoleTarget("console")
                 {
-                    Layout = "${time}|${level:uppercase=true:truncate=5}|${logger:shortName=true}|${message}"
+                    Layout = "${time}|${level:uppercase=true:truncate=5}|${logger:shortName=true}|${gdc:item=process}|${message}"
                 };
                 config.AddRule(LogLevel.Debug, LogLevel.Fatal, consoleTarget);
                 LogManager.Configuration = config;
@@ -444,6 +535,9 @@ namespace GalacticExpansion
         /// - Другие расширенные возможности API
         /// 
         /// Примечание: Этот метод вызывается на том же Dedicated Server процессе после Game_Start.
+        /// КРИТИЧЕСКИ ВАЖНО: IMod.Init вызывается в КАЖДОМ процессе (Dedi и PfServer).        /// Определяем режим процесса и инициализируем соответственно:
+        /// - ApplicationMode.DedicatedServer: полная инициализация (симуляция, логика, IPC отправка команд)
+        /// - ApplicationMode.PlayfieldServer: легковесная инициализация (IPC прием команд, spawn)
         /// </summary>
         public void Init(IModApi modAPI)
         {
@@ -455,85 +549,722 @@ namespace GalacticExpansion
                     _logger = LogManager.GetCurrentClassLogger();
                 }
 
-                _logger.Info("========================================");
-                _logger.Info("GalacticExpansion IMod.Init - Extended API initialization...");
-                _logger.Info("========================================");
-
-                // Сохраняем ссылку на IModApi для доступа к расширенным возможностям
+                // Определяем режим процесса через IModApi.Application.Mode
+                _processMode = modAPI.Application.Mode;
                 _extendedModApi = modAPI;
 
-                // Поздняя инъекция IModApi в PlacementResolver (в Game_Start API ещё недоступен)
-                if (_container != null && _container.TryResolve<IPlacementResolver>(out var placementResolver) && placementResolver != null)
+                _logger.Info("========================================");
+                _logger.Info($"GalacticExpansion IMod.Init - Process Mode: {_processMode}");
+                _logger.Info("========================================");
+
+                // Разные пути инициализации для разных процессов
+                if (_processMode == ApplicationMode.DedicatedServer)
                 {
-                    placementResolver.SetModApi(modAPI);
-                    _logger.Info("✅ IModApi passed to PlacementResolver - terrain height via IPlayfield.GetTerrainHeightAt() enabled");
+                    _logger.Info("Initializing as DEDICATED SERVER (full simulation + IPC sender)");
+                    InitializeDedicatedServer(modAPI);
+                }
+                else if (_processMode == ApplicationMode.PlayfieldServer)
+                {
+                    _logger.Info("Initializing as PLAYFIELD SERVER (IPC receiver + spawn executor)");
+                    InitializePlayfieldServer(modAPI);
                 }
                 else
                 {
-                    _logger.Info("✅ IModApi initialized (PlacementResolver not resolved, terrain may use fallback)");
+                    _logger.Warn($"Unknown process mode: {_processMode} - skipping initialization");
                 }
 
-                // Подписка на событие загрузки playfield (правильный способ для детектирования готовности playfield)
-                // OnPlayfieldLoaded срабатывает когда playfield полностью загружен и готов для операций спавна
-                if (modAPI.Application != null)
-                {
-                    modAPI.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
-                    _logger.Info("✅ Subscribed to IModApi.Application.OnPlayfieldLoaded event");
-                }
-                else
-                {
-                    _logger.Warn("⚠️ IModApi.Application is null - cannot subscribe to OnPlayfieldLoaded");
-                }
+                _isInitialized = true;
             }
             catch (Exception ex)
             {
                 var logger = _logger ?? LogManager.GetCurrentClassLogger();
-                logger.Error(ex, "Error during IMod.Init (extended API initialization)");
+                logger.Fatal(ex, "CRITICAL ERROR during IMod.Init");
             }
         }
 
         /// <summary>
-        /// Обработчик события OnPlayfieldLoaded из IModApi.Application.
-        /// Вызывается когда playfield полностью загружен и готов для операций (спавн структур, и т.д.).
-        /// Это ПРАВИЛЬНОЕ событие для материализации колоний (в отличие от Event_Playfield_Loaded который срабатывает слишком рано).
+        /// Инициализирует Gateway и модули симуляции (вызывается либо из Game_Start, либо из Init)
         /// </summary>
-        private void OnPlayfieldLoaded(IPlayfield playfield)
+        private void InitializeGatewayAndModules()
         {
             try
             {
-                if (playfield == null)
+                if (_logger == null)
                 {
-                    _logger?.Warn("OnPlayfieldLoaded: playfield is null");
-                    return;
+                    throw new InvalidOperationException("Logger must be initialized before calling InitializeGatewayAndModules");
                 }
 
-                var playfieldName = playfield.Name;
-                _logger?.Info($"🎯 IModApi.OnPlayfieldLoaded: '{playfieldName}' is now READY for spawn operations");
+                // Локальная переменная для работы с logger (избегаем warnings)
+                var logger = _logger;
 
-                // Получаем ColonyManager из контейнера для материализации колоний
-                if (_container != null && _container.TryResolve<IColonyManager>(out var colonyManager) && colonyManager != null)
+                // Определяем путь к моду (если ещё не определён)
+                if (_config == null)
                 {
-                    // Запускаем материализацию виртуальных колоний асинхронно
-                    _ = Task.Run(async () =>
+                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                    
+                    logger.Info($"Loading configuration from: {modPath}");
+                    var configLoader = new ConfigurationLoader(modPath);
+                    _config = configLoader.Load();
+                    UpdateLogLevel(_config.LogLevel);
+                }
+
+                // Создаем контейнер если ещё не создан
+                if (_container == null)
+                {
+                    _container = new ServiceContainer();
+                    _container.Register<ILogger>(logger);
+                    _container.Register<Configuration>(_config);
+                }
+
+                // Регистрируем ModGameAPI если доступен
+                if (_modApi != null)
+                {
+                    _container.Register<ModGameAPI>(_modApi);
+                }
+
+                // Инициализируем Gateway (требуется ModGameAPI)
+                if (_modApi == null)
+                {
+                    logger.Error("Cannot initialize Gateway - ModGameAPI is null");
+                    throw new InvalidOperationException("ModGameAPI is required for Gateway initialization");
+                }
+
+                logger.Info("Initializing Empyrion Gateway...");
+                _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
+                _container.Register<IEmpyrionGateway>(_gateway);
+                _gateway.Start();
+                logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
+
+                // Инициализируем StateStore если ещё не создан
+                if (_stateStore == null)
+                {
+                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                    
+                    logger.Info("Initializing State Store...");
+                    _stateStore = new StateStore(modPath);
+                    _container.Register<IStateStore>(_stateStore);
+                }
+
+                // Инициализируем Phase 2/3: Core Loop и доменные компоненты
+                logger.Info("Initializing Phase 2/3 components...");
+                
+                // EventBus
+                var eventBus = new EventBus(logger);
+                _container.Register<IEventBus>(eventBus);
+                logger.Info("EventBus initialized");
+                
+                // ModuleRegistry
+                var moduleRegistry = new ModuleRegistry(_logger);
+                _container.Register<IModuleRegistry>(moduleRegistry);
+                _logger.Info("ModuleRegistry initialized");
+                
+                // SimulationEngine
+                _simulationEngine = new SimulationEngine(_stateStore, moduleRegistry, eventBus, _logger);
+                _container.Register<ISimulationEngine>(_simulationEngine);
+                
+                // Регистрируем модули симуляции
+                _logger.Info("Registering simulation modules...");
+                
+                // PlayerTracker
+                var playerTracker = new PlayerTracker(_gateway, eventBus, _logger);
+                _simulationEngine.RegisterModule(playerTracker);
+                _container.Register<IPlayerTracker>(playerTracker);
+                _logger.Info("PlayerTracker registered");
+                
+                // StructureTracker
+                var structureTracker = new StructureTracker(_gateway, eventBus, _logger);
+                _simulationEngine.RegisterModule(structureTracker);
+                _container.Register<IStructureTracker>(structureTracker);
+                _logger.Info("StructureTracker registered");
+                
+                // Регистрируем Phase 3 Domain модули
+                _logger.Info("Registering Phase 3 domain modules...");
+                
+                // PlacementResolver
+                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, modApi: _extendedModApi);
+                _container.Register<IPlacementResolver>(placementResolver);
+                _logger.Info("PlacementResolver registered");
+                
+                // EntitySpawner
+                var entitySpawner = new EntitySpawner(_gateway, placementResolver, _logger);
+                _container.Register<IEntitySpawner>(entitySpawner);
+                _logger.Info("EntitySpawner registered");
+                
+                // EconomySimulator
+                var economySimulator = new EconomySimulator(_config, _logger);
+                _container.Register<IEconomySimulator>(economySimulator);
+                _logger.Info("EconomySimulator registered");
+                
+                // UnitEconomyManager
+                var unitEconomyManager = new UnitEconomyManager(_config, _logger);
+                _container.Register<IUnitEconomyManager>(unitEconomyManager);
+                _logger.Info("UnitEconomyManager registered");
+                
+                // StageManager
+                var stageManager = new StageManager(
+                    _gateway, entitySpawner, placementResolver, economySimulator,
+                    unitEconomyManager, _stateStore, eventBus, _config, _logger
+                );
+                _container.Register<IStageManager>(stageManager);
+                _logger.Info("StageManager registered");
+                
+                // ColonyManager (сохраняем для вызова из Game_Update)
+                var colonyManager = new ColonyManager(
+                    _gateway, stageManager, economySimulator,
+                    unitEconomyManager, _stateStore, _logger
+                );
+                _colonyManager = colonyManager;
+                _container.Register<IColonyManager>(colonyManager);
+                _logger.Info("ColonyManager registered");
+
+                // ColonyTickModule
+                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
+                _simulationEngine.RegisterModule(colonyTickModule);
+                _logger.Info("ColonyTickModule registered");
+                
+                // Запускаем симуляцию
+                _logger.Info("Starting simulation engine...");
+                _ = Task.Run(async () => await _simulationEngine.StartAsync());
+                
+                Task.Delay(500).Wait();
+                
+                _currentState = _simulationEngine.State;
+                _lastBackupTime = DateTime.UtcNow;
+
+                _logger.Info("========================================");
+                _logger.Info("GLEX initialized successfully!");
+                _logger.Info($"  Home Playfield: {_config.HomePlayfield}");
+                _logger.Info($"  Expansion: {(_config.EnableExpansion ? "Enabled" : "Disabled")}");
+                _logger.Info($"  Tick Interval: {_config.Simulation.TickIntervalMs}ms");
+                _logger.Info($"  Auto-save: every {_config.Simulation.SaveIntervalMinutes} minute(s)");
+                _logger.Info("========================================");
+                
+                _isInitialized = true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.Fatal(ex, "FATAL ERROR during gateway and modules initialization!");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Инициализация для Dedicated Server процесса.
+        /// КРИТИЧНО: NetworkBridge и IPCEntitySpawner создаются ДО модулей, чтобы весь граф зависимостей был правильным!
+        /// </summary>
+        private void InitializeDedicatedServer(IModApi modAPI)
+        {
+            try
+            {
+                // Извлекаем ModGameAPI из IModApi если нужно
+                if (_modApi == null)
+                {
+                    _logger?.Info("Extracting ModGameAPI from IModApi for Dedi process...");
+                    var gameApiProperty = modAPI.GetType().GetProperty("GameAPI") ?? modAPI.GetType().GetProperty("API");
+                    if (gameApiProperty != null)
                     {
-                        try
+                        var gameApi = gameApiProperty.GetValue(modAPI) as ModGameAPI;
+                        if (gameApi != null)
                         {
-                            await colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfieldName);
+                            _logger?.Info("✅ ModGameAPI extracted successfully");
+                            _modApi = gameApi;
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            _logger?.Error(ex, $"Error ensuring colonies spawned on playfield '{playfieldName}'");
+                            _logger?.Error("❌ Failed to extract ModGameAPI - cannot initialize");
+                            return;
                         }
-                    });
+                    }
+                    else
+                    {
+                        _logger?.Error("❌ IModApi does not contain GameAPI property");
+                        return;
+                    }
                 }
-                else
+
+                // КРИТИЧНО: NetworkBridge создаем ПЕРВЫМ (до InitializeGatewayAndModules)
+                _logger?.Info("Initializing NetworkBridge for Dedi process...");
+                _networkBridge = new NetworkBridge(modAPI, _logger ?? LogManager.GetCurrentClassLogger());
+                _networkBridge.InitializeForDedi();
+                _logger?.Info("✅ NetworkBridge initialized for Dedi (can send commands to PfServer)");
+
+                // Инициализируем базовые компоненты (Gateway, StateStore, EventBus, ModuleRegistry)
+                // НО НЕ создаем EntitySpawner и зависимые модули!
+                InitializeGatewayAndModulesForDedi(modAPI);
+
+                // Поздняя инъекция IModApi в PlacementResolver
+                if (_container != null && _container.TryResolve<IPlacementResolver>(out var placementResolver2) && placementResolver2 != null)
                 {
-                    _logger?.Warn("OnPlayfieldLoaded: ColonyManager not resolved from container");
+                    placementResolver2.SetModApi(modAPI);
+                    _logger?.Info("✅ IModApi injected into PlacementResolver");
                 }
             }
             catch (Exception ex)
             {
-                _logger?.Error(ex, "Error in OnPlayfieldLoaded handler");
+                _logger?.Fatal(ex, "CRITICAL ERROR during Dedi initialization");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Инициализация Gateway и модулей специально для Dedi процесса.
+        /// Создает IPCEntitySpawner вместо обычного EntitySpawner ДО создания StageManager и других модулей!
+        /// </summary>
+        private void InitializeGatewayAndModulesForDedi(IModApi modAPI)
+        {
+            try
+            {
+                if (_logger == null)
+                    throw new InvalidOperationException("Logger must be initialized");
+                if (_networkBridge == null)
+                    throw new InvalidOperationException("NetworkBridge must be initialized before modules");
+
+                var logger = _logger;
+
+                // Определяем путь к моду
+                if (_config == null)
+                {
+                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                    
+                    logger.Info($"Loading configuration from: {modPath}");
+                    var configLoader = new ConfigurationLoader(modPath);
+                    _config = configLoader.Load();
+                    UpdateLogLevel(_config.LogLevel);
+                }
+
+                // Создаем контейнер если нужно
+                if (_container == null)
+                {
+                    _container = new ServiceContainer();
+                    _container.Register<ILogger>(logger);
+                    _container.Register<Configuration>(_config);
+                }
+
+                // Регистрируем ModGameAPI
+                if (_modApi != null)
+                    _container.Register<ModGameAPI>(_modApi);
+
+                // Gateway
+                if (_modApi == null)
+                {
+                    logger.Error("Cannot initialize Gateway - ModGameAPI is null");
+                    throw new InvalidOperationException("ModGameAPI required");
+                }
+
+                logger.Info("Initializing Empyrion Gateway...");
+                _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
+                _container.Register<IEmpyrionGateway>(_gateway);
+                _gateway.Start();
+                logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
+
+                // StateStore
+                if (_stateStore == null)
+                {
+                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                    
+                    logger.Info("Initializing State Store...");
+                    _stateStore = new StateStore(modPath);
+                    _container.Register<IStateStore>(_stateStore);
+                }
+
+                // EventBus
+                var eventBus = new EventBus(logger);
+                _container.Register<IEventBus>(eventBus);
+                logger.Info("EventBus initialized");
+                
+                // ModuleRegistry
+                var moduleRegistry = new ModuleRegistry(logger);
+                _container.Register<IModuleRegistry>(moduleRegistry);
+                logger.Info("ModuleRegistry initialized");
+                
+                // SimulationEngine
+                _simulationEngine = new SimulationEngine(_stateStore, moduleRegistry, eventBus, logger);
+                _container.Register<ISimulationEngine>(_simulationEngine);
+                
+                // Регистрируем модули симуляции
+                logger.Info("Registering simulation modules...");
+                
+                // PlayerTracker
+                var playerTracker = new PlayerTracker(_gateway, eventBus, logger);
+                _simulationEngine.RegisterModule(playerTracker);
+                _container.Register<IPlayerTracker>(playerTracker);
+                logger.Info("PlayerTracker registered");
+                
+                // StructureTracker
+                var structureTracker = new StructureTracker(_gateway, eventBus, logger);
+                _simulationEngine.RegisterModule(structureTracker);
+                _container.Register<IStructureTracker>(structureTracker);
+                logger.Info("StructureTracker registered");
+                
+                // ===== КРИТИЧНО: Создаем IPCEntitySpawner ДО StageManager/ColonyManager =====
+                logger.Info("Creating IPCEntitySpawner for Dedi process...");
+                
+                // PlacementResolver
+                var placementResolver = new PlacementResolver(_gateway, playerTracker, logger, modAPI);
+                _container.Register<IPlacementResolver>(placementResolver);
+                logger.Info("PlacementResolver registered");
+                
+                // Сначала создаем обычный EntitySpawner (для делегирования в PfServer)
+                var directSpawner = new EntitySpawner(_gateway, placementResolver, logger);
+                
+                // Оборачиваем в IPCEntitySpawner (для Dedi он отправляет IPC команды)
+                var ipcSpawner = new IPCEntitySpawner(
+                    directSpawner,
+                    _networkBridge, // NetworkBridge уже создан!
+                    ApplicationMode.DedicatedServer,
+                    logger
+                );
+                _container.Register<IEntitySpawner>(ipcSpawner);
+                logger.Info("✅ IPCEntitySpawner registered (will use IPC for all spawn operations)");
+                
+                // Теперь создаем модули которые используют IEntitySpawner - они получат IPCEntitySpawner!
+                var economySimulator = new EconomySimulator(_config, logger);
+                _container.Register<IEconomySimulator>(economySimulator);
+                logger.Info("EconomySimulator registered");
+                
+                var unitEconomyManager = new UnitEconomyManager(_config, logger);
+                _container.Register<IUnitEconomyManager>(unitEconomyManager);
+                logger.Info("UnitEconomyManager registered");
+                
+                // StageManager получает IPCEntitySpawner!
+                var stageManager = new StageManager(
+                    _gateway,
+                    ipcSpawner, // <-- IPC spawner с самого начала!
+                    placementResolver,
+                    economySimulator,
+                    unitEconomyManager,
+                    _stateStore,
+                    eventBus,
+                    _config,
+                    logger
+                );
+                _container.Register<IStageManager>(stageManager);
+                logger.Info("StageManager registered with IPCEntitySpawner");
+                
+                // ColonyManager получает StageManager с IPCEntitySpawner
+                var colonyManager = new ColonyManager(
+                    _gateway,
+                    stageManager,
+                    economySimulator,
+                    unitEconomyManager,
+                    _stateStore,
+                    logger
+                );
+                _colonyManager = colonyManager;
+                _container.Register<IColonyManager>(colonyManager);
+                logger.Info("ColonyManager registered");
+
+                // ColonyTickModule получает ColonyManager с правильным графом
+                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, logger);
+                _simulationEngine.RegisterModule(colonyTickModule);
+                logger.Info("ColonyTickModule registered");
+                
+                // Запускаем симуляцию
+                logger.Info("Starting simulation engine...");
+                _ = Task.Run(async () => await _simulationEngine.StartAsync());
+                
+                Task.Delay(500).Wait();
+                
+                _currentState = _simulationEngine.State;
+                _lastBackupTime = DateTime.UtcNow;
+
+                logger.Info("========================================");
+                logger.Info("GLEX Dedi process initialized successfully!");
+                logger.Info($"  Home Playfield: {_config.HomePlayfield}");
+                logger.Info($"  IPC Mode: ENABLED (spawn via NetworkBridge)");
+                logger.Info("========================================");
+                
+                _isInitialized = true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.Fatal(ex, "FATAL ERROR during Dedi modules initialization");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Инициализация для PlayfieldServer процесса.
+        /// ЛЕГКОВЕСНАЯ инициализация: только NetworkBridge (IPC receiver) + EntitySpawner для выполнения spawn.
+        /// НЕТ симуляции, логики колоний - это все в Dedi процессе.
+        /// КРИТИЧНО: Подписка на OnPlayfieldLoaded для гарантированной готовности playfield!
+        /// </summary>
+        private void InitializePlayfieldServer(IModApi modAPI)
+        {
+            try
+            {
+                _logger?.Info("PfServer initialization - minimal setup for spawn operations");
+
+                // КРИТИЧНО: Подписываемся на OnPlayfieldLoaded для гарантированной готовности
+                // Это надежнее чем Event_Playfield_Loaded через Game_Event
+                modAPI.Application.OnPlayfieldLoaded += (pfInstance) =>
+                {
+                    try
+                    {
+                        // Получаем название playfield из IPlayfield instance
+                        var pfName = pfInstance?.Name ?? "Unknown";
+                        _logger?.Info($"[PfServer] OnPlayfieldLoaded: {pfName} (IPlayfield instance received)");
+                        
+                        // Сохраняем название playfield
+                        _currentPlayfield = pfName;
+                        
+                        // Завершаем инициализацию NetworkBridge (теперь знаем playfield)
+                        if (_networkBridge != null && !string.IsNullOrEmpty(_currentPlayfield))
+                        {
+                            _networkBridge.InitializeForPlayfieldServer(_currentPlayfield);
+                            _logger?.Info($"✅ [PfServer] NetworkBridge fully initialized for '{_currentPlayfield}' (ready for IPC)");
+                        }
+                        else
+                        {
+                            _logger?.Error($"[PfServer] Cannot initialize NetworkBridge: bridge={_networkBridge != null}, playfield='{_currentPlayfield}'");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, "[PfServer] Error in OnPlayfieldLoaded handler");
+                    }
+                };
+                _logger?.Info("✅ [PfServer] Subscribed to OnPlayfieldLoaded");
+
+                // Извлекаем ModGameAPI
+                var gameApiProperty = modAPI.GetType().GetProperty("GameAPI") ?? modAPI.GetType().GetProperty("API");
+                if (gameApiProperty != null)
+                {
+                    var gameApi = gameApiProperty.GetValue(modAPI) as ModGameAPI;
+                    if (gameApi != null)
+                    {
+                        _modApi = gameApi;
+                        _logger?.Info("✅ ModGameAPI extracted for PfServer");
+                    }
+                }
+
+                // Минимальная конфигурация (только для spawn limits)
+                if (_config == null)
+                {
+                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
+                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
+                    var configLoader = new ConfigurationLoader(modPath);
+                    _config = configLoader.Load();
+                }
+
+                // Создаем минимальный контейнер
+                _container = new ServiceContainer();
+                _container.Register<ILogger>(_logger ?? LogManager.GetCurrentClassLogger());
+                _container.Register<Configuration>(_config);
+                if (_modApi != null)
+                    _container.Register<ModGameAPI>(_modApi);
+
+                // Gateway для spawn операций
+                if (_modApi != null)
+                {
+                    _logger?.Info("Initializing Gateway for PfServer spawn operations...");
+                    _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
+                    _container.Register<IEmpyrionGateway>(_gateway);
+                    _gateway.Start();
+                    _logger?.Info("✅ Gateway started for PfServer");
+                }
+
+                // PlacementResolver (для определения высоты) и EntitySpawner (для spawn)
+                var logger = _logger ?? LogManager.GetCurrentClassLogger();
+                var gateway = _gateway ?? throw new InvalidOperationException("Gateway required for PfServer");
+                
+                var placementResolver = new PlacementResolver(gateway, null, logger, modAPI);
+                _container.Register<IPlacementResolver>(placementResolver);
+
+                // Создаем обычный EntitySpawner (для прямого spawn в PfServer)
+                var directSpawner = new EntitySpawner(gateway, placementResolver, logger);
+                
+                // Оборачиваем в IPCEntitySpawner (для PfServer он просто делегирует к directSpawner)
+                var ipcSpawner = new IPCEntitySpawner(
+                    directSpawner,
+                    ApplicationMode.PlayfieldServer,
+                    logger
+                );
+                
+                _container.Register<IEntitySpawner>(ipcSpawner);
+                _logger?.Info("✅ IPCEntitySpawner initialized for PfServer (direct spawn mode)");
+
+                // Инициализируем NetworkBridge для приема IPC команд от Dedi
+                // ВАЖНО: название playfield будет установлено когда получим Event_Playfield_Loaded
+                _logger?.Info("Initializing NetworkBridge for PfServer...");
+                _networkBridge = new NetworkBridge(modAPI, _logger ?? LogManager.GetCurrentClassLogger());
+                
+                // Регистрируем обработчик IPC запросов
+                _networkBridge.OnRequestReceived += HandleIPCRequestAsync;
+                
+                // ВАЖНО: InitializeForPlayfieldServer будет вызван из Event_Playfield_Loaded когда узнаем название playfield
+                _logger?.Info("⏳ NetworkBridge created, waiting for Event_Playfield_Loaded to complete registration");
+            }
+            catch (Exception ex)
+            {
+                _logger?.Fatal(ex, "CRITICAL ERROR during PfServer initialization");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Обработчик IPC запросов от Dedi процесса (вызывается в PfServer).
+        /// КРИТИЧНО: Жесткая проверка playfield перед выполнением операций!
+        /// </summary>
+        private async Task<IPCMessage?> HandleIPCRequestAsync(IPCMessage request, string playfieldName)
+        {
+            try
+            {
+                _logger?.Info($"[PfServer] Handling IPC request: {request.MessageType} (playfield: {playfieldName})");
+
+                if (request is SpawnStructureRequest spawnReq)
+                {
+                    // КРИТИЧНО: Жесткая проверка playfield!
+                    // Если не совпадает - возвращаем ошибку, НЕ продолжаем!
+                    if (spawnReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={spawnReq.Playfield}, Current={_currentPlayfield}. Cannot spawn in wrong playfield!";
+                        _logger?.Error($"[PfServer] ❌ {error}");
+                        return new SpawnStructureResponse
+                        {
+                            Success = false,
+                            ErrorMessage = error,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+
+                    // Получаем EntitySpawner из контейнера
+                    if (_container == null || !_container.TryResolve<IEntitySpawner>(out var entitySpawner) || entitySpawner == null)
+                    {
+                        _logger?.Error("[PfServer] EntitySpawner not available");
+                        return new SpawnStructureResponse
+                        {
+                            Success = false,
+                            ErrorMessage = "EntitySpawner not initialized",
+                            Playfield = playfieldName
+                        };
+                    }
+
+                    // Выполняем spawn
+                    try
+                    {
+                        var position = new Models.Vector3(spawnReq.Position[0], spawnReq.Position[1], spawnReq.Position[2]);
+                        var rotation = new Models.Vector3(spawnReq.Rotation[0], spawnReq.Rotation[1], spawnReq.Rotation[2]);
+
+                        _logger?.Info($"[PfServer] Spawning structure {spawnReq.PrefabName} at {position}");
+                        
+                        var entityId = await entitySpawner.SpawnStructureAsync(
+                            spawnReq.Playfield,
+                            spawnReq.PrefabName,
+                            position,
+                            rotation,
+                            spawnReq.FactionId
+                        );
+
+                        _logger?.Info($"[PfServer] ✅ Structure spawn successful: EntityId={entityId}");
+
+                        return new SpawnStructureResponse
+                        {
+                            Success = true,
+                            EntityId = entityId,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer] ❌ Structure spawn failed: {spawnReq.PrefabName}");
+                        return new SpawnStructureResponse
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+                }
+                else if (request is SpawnNPCRequest npcReq)
+                {
+                    // КРИТИЧНО: Жесткая проверка playfield для NPC!
+                    if (npcReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={npcReq.Playfield}, Current={_currentPlayfield}. Cannot spawn NPC in wrong playfield!";
+                        _logger?.Error($"[PfServer] ❌ {error}");
+                        return new SpawnNPCResponse
+                        {
+                            Success = false,
+                            ErrorMessage = error,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+
+                    // Получаем EntitySpawner
+                    if (_container == null || !_container.TryResolve<IEntitySpawner>(out var entitySpawner) || entitySpawner == null)
+                    {
+                        _logger?.Error("[PfServer] EntitySpawner not available for NPC spawn");
+                        return new SpawnNPCResponse
+                        {
+                            Success = false,
+                            ErrorMessage = "EntitySpawner not initialized",
+                            Playfield = playfieldName
+                        };
+                    }
+
+                    // Выполняем NPC spawn (terrain height определится в EntitySpawner)
+                    try
+                    {
+                        float x = npcReq.Position[0];
+                        float z = npcReq.Position[2];
+
+                        _logger?.Info($"[PfServer] Spawning NPC {npcReq.NPCClassName} at ({x}, {z})");
+                        
+                        var entityId = await entitySpawner.SpawnNPCAtTerrainAsync(
+                            npcReq.Playfield,
+                            npcReq.NPCClassName,
+                            x,
+                            z,
+                            npcReq.FactionName
+                        );
+
+                        _logger?.Info($"[PfServer] ✅ NPC spawn successful: EntityId={entityId}");
+
+                        return new SpawnNPCResponse
+                        {
+                            Success = true,
+                            EntityId = entityId,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer] ❌ NPC spawn failed: {npcReq.NPCClassName}");
+                        return new SpawnNPCResponse
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+                }
+                else if (request is PlayfieldReadyRequest readyReq)
+                {
+                    // Проверка готовности playfield
+                    bool isReady = _gateway != null && _currentPlayfield == readyReq.Playfield;
+                    
+                    _logger?.Info($"[PfServer] Playfield ready check: {isReady}");
+                    
+                    return new PlayfieldReadyResponse
+                    {
+                        IsReady = isReady,
+                        Playfield = readyReq.Playfield,
+                        Info = isReady ? "Playfield loaded and ready" : "Playfield not loaded or name mismatch"
+                    };
+                }
+
+                _logger?.Warn($"[PfServer] Unknown request type: {request.MessageType}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "[PfServer] Error handling IPC request");
+                return null;
             }
         }
 
@@ -545,12 +1276,8 @@ namespace GalacticExpansion
         {
             _logger?.Info("IMod.Shutdown called");
             
-            // Отписываемся от события OnPlayfieldLoaded
-            if (_extendedModApi?.Application != null)
-            {
-                _extendedModApi.Application.OnPlayfieldLoaded -= OnPlayfieldLoaded;
-                _logger?.Info("Unsubscribed from IModApi.Application.OnPlayfieldLoaded event");
-            }
+            // Очищаем NetworkBridge
+            _networkBridge?.Dispose();
             
             // Используем тот же метод остановки что и Game_Exit
             Game_Exit();

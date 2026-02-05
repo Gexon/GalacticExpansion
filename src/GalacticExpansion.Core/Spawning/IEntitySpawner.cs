@@ -13,14 +13,16 @@ namespace GalacticExpansion.Core.Spawning
     {
         /// <summary>
         /// Спавнит структуру (Base/CV/SV/HV) на указанной позиции.
+        /// КРИТИЧНО: playfield ОБЯЗАТЕЛЕН для правильной работы spawn в Empyrion multi-process архитектуре!
         /// </summary>
+        /// <param name="playfield">Название playfield (ОБЯЗАТЕЛЬНО для правильной работы spawn)</param>
         /// <param name="prefabName">Название prefab (например, "GLEX_Base_L1")</param>
         /// <param name="position">Позиция для спавна</param>
         /// <param name="rotation">Поворот структуры (в градусах)</param>
         /// <param name="factionId">ID фракции (обычно 2 для Zirax)</param>
         /// <returns>Entity ID созданной структуры</returns>
         /// <exception cref="SpawnException">Выбрасывается при ошибке спавна</exception>
-        Task<int> SpawnStructureAsync(string prefabName, Vector3 position, Vector3 rotation, int factionId);
+        Task<int> SpawnStructureAsync(string playfield, string prefabName, Vector3 position, Vector3 rotation, int factionId);
 
         /// <summary>
         /// Спавнит структуру на рельефе с точным определением высоты (API v1.15+).

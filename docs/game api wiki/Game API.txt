@@ -1,0 +1,193 @@
+Game API
+
+Contents
+
+    1 Getting Started
+        1.1 Requirements
+        1.2 Creating Project
+        1.3 API1 Mod Entry
+        1.4 API2 Mod Entry
+        1.5 Accessing Empyrion from your Mod
+        1.6 Including your mod to Empyrion
+        1.7 Sharing your mod
+    2 Ressources
+        2.1 Basic
+        2.2 Advanced
+    3 API1
+        3.1 Interfaces
+        3.2 Classes
+        3.3 Enums
+    4 Suggested standards
+        4.1 Proposed
+            4.1.1 Conflicting standards
+        4.2 Commonly used
+        4.3 File-standards
+    5 API2
+        5.1 Explanation
+        5.2 Differences
+        5.3 Requirements
+    6 Links
+
+Getting Started
+Requirements
+
+What you will need to get started:
+
+    Visual Studio 2008 or higher
+    An installed version of Empyrion (Client)
+    (optional) Miscellaneous files to get started from (https://github.com/lostinplace/sample-empyrion-mod) - These can help you get started faster, but isn't required.
+
+There are ways to code with other tools (Ex. Eclipse, Notepad++, etc.), but this is not covered at this time.
+Creating Project
+
+Empyrion server mods are compiled in .Net 4.0.
+
+In Visual Studio,
+
+    Create a new "Class Library" project.
+    Ensure the Framework on the top is set to .Net 4.0
+    Name the project and click OK.
+    In Visual Studio Go go the Reference Manager
+    Navigate to "Empyrion - Galactic Survival/DedicatedServer\EmpyrionDedicated_Data\Managed" (Usually in C:\Program Files (x86)\Steam\steamapps\common)
+    Add both the Mif.dll and protobuf-net.dll as references to the project and mark them with "CopyLocal = false" in their property settings
+
+From this point, you have the project base created.
+API1 Mod Entry
+
+You may need to add the following include so some of the class arguments work.
+
+using Eleon.Modding;
+
+Your first class must inherit ModInterface and should implement all methods of the interface.
+
+   public class MyEmpyrionMod : ModInterface {
+       public void Game_Start(ModGameAPI gameAPI) {
+       }
+       public void Game_Event(CmdId cmdId, ushort seqNr, object data) {
+       }
+       public void Game_Update() {
+       }
+       public void Game_Exit() {
+       }
+   }
+
+API2 Mod Entry
+
+You need to add the following for the class to work
+
+using Eleon;
+
+your first class must inherit IMod and should implement all methods of the interface.
+
+   public class MyEmpyrionMod : IMod  {
+       public void Init(IModAPI modAPI) {
+       }
+       public void Shutdown() {
+       }
+   }
+
+Example showing the difference between API1 and API2
+
+Mod + Code: https://www.patreon.com/posts/43804726
+
+Video: https://youtu.be/8_Wr-EwtbE8
+Accessing Empyrion from your Mod
+
+The Mod API is structured asynchronously. Any request you make via ModGameAPI.Game_Request() will not be returned immediately. Your results will come through the ModInterface.Game_Event() callback. This is something to remember when building your code.
+
+To help keep track of your requests, you can use the "seqNr" parameter on Game_Request. This can help you know which results to look for when they return during the Game_Event callback.
+Including your mod to Empyrion
+
+In servers, they are to be included in Content/Mods/<yourmodname>/
+
+If your mod is 'DeathMessenger', the folder should be called this, and you should (atleast) have your .dll placed inside, aswell as any additional files you might require (such as a config file, data, or other dependencies)
+
+Note that if you are using a dedicated server host, said host must allow custom .dll's to be uploaded to that folder.
+Sharing your mod
+
+There is currently no workshop-integration with mods.
+
+The best method of publicly sharing it, is making a post with the post title tag [mod] on the forum: https://empyriononline.com/forums/the-hangar-bay.29/ , under 'The Hangar Bay'
+
+(For instance '[mod] DeathMessenger', where you include a download link to a source of your choice (Google drive is an option), or a github link, for all the files pre-compiled, if you so desire. It is recommended to include a good description of the mod, and its functionalities (documentation))
+
+Additionally, you should consider adding your mod to this list!
+
+You may additionally want to include this link, wherever you have published your mod: How to install a mod
+Ressources
+Basic
+
+    Referencing a file in Visual Studios
+    Basic mod-writing workflow in Visual Studios
+    On using string-replacement
+
+Advanced
+
+    Using Yamldotnet
+    Localizations and your mod
+    Using Config.ecf
+
+For all Requests, and Events, refer to CmdId
+API1
+Interfaces
+
+    ModInterface - Interface Empyrion will use to access your mod.
+    ModGameAPI - Interface for you to send requests and calls to Empyrion.
+
+Classes
+
+Eleon.Modding. prefaced
+
+    Id - Used to pass entity id information.
+    Inventory - Used to represent the player's inventory.
+    ItemStack - Used to represent a single item in a player's inventory.
+    PlayerInfo - Used to represent all data related to a player
+    PlayerInfoSet - Used to set player data (Health, food, oxygen, experience, etc.)
+
+Enums
+
+    CmdId - All request and event commands.
+
+Suggested standards
+
+If you have a method, that you think should be a standard, please put it under 'Proposed'. If the majority of modders agree, this should be moved to 'Commonly Used'. If your standard is conflicting with another, please add it under 'conflicting standards'
+
+Please link proposed standards into "Empyrion Mods and Tools" Discord #mod_standards
+
+If you are a modder, please also 'vote' on these standards (by a positive / negative emote-reaction to the post containing a link to said standard), on above discord.
+
+Note: You are not required to follow these standards.
+Proposed
+
+    List your mod on server-launch
+    When using config files, use variable paths, if you refer to other files
+
+Conflicting standards
+
+    List your mod - Event_ChatMessage - Answer !mods call - Only to the user typing it (Conflicting with List your mod - Event_ChatMessage - Answer !mods call)
+    List your mod - Event_ChatMessage - Answer !mods call (Conflicting with List your mod - Event_ChatMessage - Answer !mods call - Only to the user typing it)
+
+Commonly used
+File-standards
+
+List
+API2
+Explanation
+
+Unlike API1, API2's functionality is split across the different processes.
+
+for example:
+
+Chat is sent to the Dedicated process
+
+Entity Info is sent to the Playfield process
+
+so, if you wanted to write the last message your friend JimBob sent in chat to an LCD screen you would have your mod load on the Dedicated and Playfield processes (it's a setting for the [ModName]_Info.yaml).
+Differences
+
+API2 mods require a file called [ModName]_Info.yaml to tell them what process to load on.
+
+API2 mods can be used in Single player games if they are programmed to be used in Single Player (load on Client process and use Client sections of the API).
+Requirements
+
+Much of the functionality of API2 requires a file called [ModName]_Info.yaml to be in the same folder as the mod's dll 

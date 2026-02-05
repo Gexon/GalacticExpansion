@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Eleon.Modding;
 using GalacticExpansion.Core.Economy;
+using GalacticExpansion.Core.Gateway;
 using GalacticExpansion.Core.Simulation;
 using GalacticExpansion.Core.Spawning;
 using GalacticExpansion.Core.State;
@@ -23,6 +25,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
     /// </summary>
     public class ColonyManagerTests
     {
+        private readonly Mock<IEmpyrionGateway> _gatewayMock;
         private readonly Mock<IStageManager> _stageManagerMock;
         private readonly Mock<IEconomySimulator> _economySimulatorMock;
         private readonly Mock<IUnitEconomyManager> _unitEconomyMock;
@@ -32,11 +35,19 @@ namespace GalacticExpansion.Tests.Unit.Simulation
 
         public ColonyManagerTests()
         {
+            _gatewayMock = new Mock<IEmpyrionGateway>();
             _stageManagerMock = new Mock<IStageManager>();
             _economySimulatorMock = new Mock<IEconomySimulator>();
             _unitEconomyMock = new Mock<IUnitEconomyManager>();
             _stateStoreMock = new Mock<IStateStore>();
             _loggerMock = new Mock<ILogger>();
+
+            // Мок для проверки готовности плейфилда (по умолчанию плейфилд готов)
+            _gatewayMock.Setup(g => g.SendRequestAsync<IdPositionRotation>(
+                CmdId.Request_Entity_PosAndRot, 
+                It.IsAny<object>(), 
+                It.IsAny<int>()
+            )).ReturnsAsync(new IdPositionRotation());
 
             // По умолчанию: апгрейд не готов
             _stageManagerMock.Setup(s => s.CanTransitionToNextStageAsync(It.IsAny<Colony>())).ReturnsAsync(false);
@@ -47,6 +58,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             _stateStoreMock.Setup(s => s.SaveAsync(It.IsAny<SimulationState>())).Returns(Task.CompletedTask);
 
             _colonyManager = new ColonyManager(
+                _gatewayMock.Object,
                 _stageManagerMock.Object,
                 _economySimulatorMock.Object,
                 _unitEconomyMock.Object,
@@ -60,16 +72,19 @@ namespace GalacticExpansion.Tests.Unit.Simulation
         {
             // Assert
             Assert.Throws<ArgumentNullException>(() => new ColonyManager(
-                null!, _economySimulatorMock.Object, _unitEconomyMock.Object, _stateStoreMock.Object, _loggerMock.Object));
+                null!, _stageManagerMock.Object, _economySimulatorMock.Object, _unitEconomyMock.Object, _stateStoreMock.Object, _loggerMock.Object));
             
             Assert.Throws<ArgumentNullException>(() => new ColonyManager(
-                _stageManagerMock.Object, null!, _unitEconomyMock.Object, _stateStoreMock.Object, _loggerMock.Object));
+                _gatewayMock.Object, null!, _economySimulatorMock.Object, _unitEconomyMock.Object, _stateStoreMock.Object, _loggerMock.Object));
             
             Assert.Throws<ArgumentNullException>(() => new ColonyManager(
-                _stageManagerMock.Object, _economySimulatorMock.Object, null!, _stateStoreMock.Object, _loggerMock.Object));
+                _gatewayMock.Object, _stageManagerMock.Object, null!, _unitEconomyMock.Object, _stateStoreMock.Object, _loggerMock.Object));
             
             Assert.Throws<ArgumentNullException>(() => new ColonyManager(
-                _stageManagerMock.Object, _economySimulatorMock.Object, _unitEconomyMock.Object, null!, _loggerMock.Object));
+                _gatewayMock.Object, _stageManagerMock.Object, _economySimulatorMock.Object, null!, _stateStoreMock.Object, _loggerMock.Object));
+            
+            Assert.Throws<ArgumentNullException>(() => new ColonyManager(
+                _gatewayMock.Object, _stageManagerMock.Object, _economySimulatorMock.Object, _unitEconomyMock.Object, null!, _loggerMock.Object));
         }
 
         [Fact(DisplayName = "UpdateColony - вызывает UpdateProduction для экономики")]

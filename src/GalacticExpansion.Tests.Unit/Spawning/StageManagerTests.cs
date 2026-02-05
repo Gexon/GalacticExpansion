@@ -368,7 +368,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
 
             // Assert
             Assert.Equal(ColonyStage.LandingPending, colony.Stage);
-            _entitySpawnerMock.Verify(e => e.SpawnStructureAsync(It.IsAny<string>(), It.IsAny<Vector3>(), It.IsAny<Vector3>(), It.IsAny<int>()), Times.Never);
+            _entitySpawnerMock.Verify(e => e.SpawnStructureAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Vector3>(), It.IsAny<Vector3>(), It.IsAny<int>()), Times.Never);
         }
 
         [Fact(DisplayName = "MaintainColonyStructures - защищает главную структуру от decay")]

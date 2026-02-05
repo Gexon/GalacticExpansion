@@ -1,0 +1,131 @@
+Game API IApplication
+
+GameAPI/IModAPI
+Contents
+
+    1 Game State
+    2 Game Ticks
+    3 Local Player
+    4 Application Mode
+    5 Update
+    6 On Playfield Unloading
+    7 Folder Paths
+    8 Players
+    9 Structure Data
+    10 Chat Messages
+    11 Pop-Up Dialog Box
+
+Game State
+
+Enum (Running, Loading, Not Running)
+
+       GameState State { get; }
+
+Game Ticks
+
+Basically a Tick timer
+
+       ulong GameTicks { get; }
+
+Local Player
+
+Interface for player data (client only?)
+
+       IPlayer LocalPlayer { get; }
+
+
+Application Mode
+
+Enum for when you request process type of wherever the mod is running This is useful when restricting your mod so the parts that only work on certain processes are only loaded by those processes.
+
+       ApplicationMode Mode { get; }
+
+Example usage:
+
+if(modApi.Application.Mode == ApplicationMode.DedicatedServer) { }
+
+Update
+
+Fixed Update
+
+       event UpdateDelegate FixedUpdate;
+
+Update
+
+       event UpdateDelegate Update;
+
+
+On Playfield Unloading
+
+Event that is run when the playfield is unloading
+
+       event PlayfieldDelegate OnPlayfieldUnloading;
+
+Event that is run when the playfield is loading
+
+       event PlayfieldDelegate OnPlayfieldLoaded;
+
+Event that is run when the the game is entered... it returns a boolean
+
+       event GamEnteredEventHandler GameEntered;
+
+
+Interface that returns an array of (string)Playfield Name, (PlayfieldType)Playfield Type and (bool)IsInstance
+
+       IPlayfieldDescr[] GetAllPlayfields();
+
+Folder Paths
+
+Very useful for getting the path to various folders ( SaveGame, This Mod, Etc)
+
+       string GetPathFor(AppFolder appFolder);
+
+Example: string SavePath = modApi.Application.GetPathFor(AppFolder.SaveGame);
+
+something...
+
+       Dictionary<int, List<string>> GetPfServerInfos();
+
+Players
+
+Easy way to get a player's SteamID, Name from their PlayerID
+
+       PlayerData? GetPlayerDataFor(int playerEntityId);
+
+Example: Quick way to grab a player's SteamID string PlayerSteamID = modApi.Application.GetPlayerDataFor(PlayerID).Value.SteamId;
+
+List the PlayerIDs of all (online?) players
+
+       IEnumerable<int> GetPlayerEntityIds();
+
+Structure Data
+
+One of these action things that returns a structure's data(?). Available on the Dedi process.
+
+       bool GetStructure(int entityId, Action<GlobalStructureInfo> resultCallback);
+
+
+One of these action things that returns structure data(?)
+
+       bool GetStructures(string playfieldName, FactionData? factionData, EntityType? entityType, Action<IEnumerable<GlobalStructureInfo>> resultCallback);
+
+Chat Messages
+
+To send chat messages to players, factions, serverwide You can set who you are chatting as too
+
+       void SendChatMessage(MessageData chatMsgData);
+
+For your mod to Receive chat messages: Event that is triggered when player, server, etc says something in chat. Works on Dedi process.
+
+       event ChatMessageSentEventHandler ChatMessageSent;
+
+To set up a listener so your mod knows when a player says something you need something like (do this in Init on Dedi process only).
+
+               modApi.Application.ChatMessageSent += Application_ChatMessageSent;
+
+and then you write the Method you just named Application_ChatMessageSent in order for the mod to be able to do anything with chat messages.
+Pop-Up Dialog Box
+
+The new pop-up window that can display text, can have a text input, can have up to 3 buttons
+
+       bool ShowDialogBox(int playerEntityId, DialogConfig config, DialogActionHandler actionHandler, int customValue);

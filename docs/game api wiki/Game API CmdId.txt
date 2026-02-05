@@ -1,0 +1,840 @@
+Game API CmdId
+
+Index: GameAPI
+Contents
+
+    1 Note on Game_Request
+    2 Note on Sequence Numbers
+        2.1 Concept: Sequencenumbers & current flaws
+        2.2 Known mods using fixed-sequence numbers, and their intervals
+        2.3 Known mods using non-fixed sequence numbers, and which intervals they use for tickets
+    3 Help finding what you are seeking
+    4 Requests
+        4.1 Request_Player_List
+        4.2 Request_Player_Info
+        4.3 Request_Player_SetPlayerInfo
+        4.4 Request_Player_GetInventory
+        4.5 Request_Player_SetInventory
+        4.6 Request_Player_AddItem
+        4.7 Request_Player_ItemExchange
+        4.8 Request_Player_GetAndRemoveInventory
+        4.9 Request_Player_Credits
+        4.10 Request_Player_SetCredits
+        4.11 Request_Player_AddCredits
+        4.12 Request_Player_ChangePlayerfield
+        4.13 Request_Blueprint_Finish
+        4.14 Request_Blueprint_Resources
+        4.15 Request_NewEntityId
+        4.16 Request_Entity_Teleport
+        4.17 Request_Entity_ChangePlayfield
+        4.18 Request_Entity_Destroy
+        4.19 Request_Entity_Destroy2
+        4.20 Request_Entity_PosAndRot
+        4.21 Request_Entity_SetName
+        4.22 Request_Entity_Spawn
+        4.23 Request_Playfield_List
+        4.24 Request_Playfield_Stats
+        4.25 Request_Load_Playfield
+        4.26 Request_Dedi_Stats
+        4.27 Request_GlobalStructure_List
+        4.28 Request_GlobalStructure_Update
+        4.29 Request_Structure_Touch
+        4.30 Request_Structure_BlockStatistics
+        4.31 Request_Get_Factions
+        4.32 Request_InGameMessage_SinglePlayer
+        4.33 Request_InGameMessage_Faction
+        4.34 Request_InGameMessage_AllPlayers
+        4.35 Request_ShowDialog_SinglePlayer
+        4.36 Request_AlliancesAll
+        4.37 Request_AlliancesFaction
+        4.38 Request_ConsoleCommand
+        4.39 Request_GetBannedPlayers
+        4.40 Request_Playfield_Entity_List
+    5 Events
+        5.1 Event_ConsoleCommand
+        5.2 Event_Player_Connected
+        5.3 Event_Player_Disconnected
+        5.4 Event_Player_List
+        5.5 Event_Player_Info
+        5.6 Event_Player_Inventory
+        5.7 Event_Player_ItemExchange
+        5.8 Event_Player_Credits
+        5.9 Event_Player_ChangedPlayfield
+        5.10 Event_Playfield_List
+        5.11 Event_Playfield_Stats
+        5.12 Event_Playfield_Loaded
+        5.13 Event_Playfield_Unloaded
+        5.14 Event_Dedi_Stats
+        5.15 Event_GameEvent
+        5.16 Event_GlobalStructure_List
+        5.17 Event_Entity_PosAndRot
+        5.18 Event_Faction_Changed
+        5.19 Event_Get_Factions
+        5.20 Event_Statistics
+        5.21 Event_NewEntityId
+        5.22 Event_Ok
+        5.23 Event_Error
+        5.24 Event_Player_DisconnectedWaiting
+        5.25 Event_ChatMessage
+        5.26 Event_Structure_BlockStatistics
+        5.27 Event_AlliancesAll
+        5.28 Event_AlliancesFaction
+        5.29 Event_BannedPlayers
+        5.30 Event_TraderNPCItemSold
+        5.31 Event_Player_GetAndRemoveInventory
+        5.32 Event_PdaStateChange
+        5.33 Event_Playfield_Entity_List
+        5.34 Event_DialogButtonIndex
+
+Note on Game_Request
+
+The format for Game_Request consists of three arguments:
+
+First being a reference to the cmdid, a 'Request' (See list below) (For instance CmdId.Request_Player_List
+
+Second being the Sequence number, of type ushort (Effectively a smaller int, unsigned int16). This number is described in detail below, but can be any arbitrary number, that you can use to 'look for callbacks relating to your call'
+
+Third being of type 'data': Ambique format, that expects the requests parameters, in the format of a
+
+new Eleon.Modding.<>(value)
+
+<> being a reference to a valid class, valid being valid under this.
+
+(for instance: GameAPI.Game_Request(CmdId.Request_Playfield_Entity_List, (ushort)19983, new Eleon.Modding.PString('Eleen')); , would request a callback for entity_list, with ID 19983, for a name (string) specified by 'Eleen'. Note that most expects .id, some .PString, and others have their own class (PlayerInfo for instance)
+Note on Sequence Numbers
+
+The second argument to the Game_Request and Game_Event methods, is the, "Sequence Number" for the request. When submitting a request, the sequence number provided will be used to identify the response message. So:
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_List, (ushort)1, null);
+
+will result in a call to Game_Event with the arguments:
+
+Sample:
+
+(CmdId.Event_Player_List, 1, <Some PlayerIdList>);
+
+ushort gives us a keyspace of 65,535, which means you should feel free to use random sequence numbers, but make sure to validate that the resonse you're receiving is of the correct type.
+
+Also note that any game-generated events are presented with a sequence number of 0, so you shouldn't use it to track requests.
+Concept: Sequencenumbers & current flaws
+
+The idea behind sequence numbers, is that you can keep an internal 'log' of what you have sent, together with a dumb of data, that you can use when you receive it again.
+
+However, the current API format sends the responses to all mods installed, so using it as a 'ticketing system' MAY be unreliable.
+
+If you use fixed numbers, you should claim an interval below 15.000.
+
+You should atleast start at 15.000+, if you use it for a ticketing system. This should still leave you with plenty of numbers. Keep in mind however, that it might still conflict with some mods:
+
+Please attempt to place your mod properly, relative to the numbers you use (so 10 is before 20, 30 before 500, etc)
+Known mods using fixed-sequence numbers, and their intervals
+
+If you do not use flexible tickets, due to the potential for conflicts, please add your mod, and the sequence number interval you use, below:
+
+    CommandCrate: 9980-9989 (Currently in use: 9984-9989)
+
+    SpotGuard: 9990-9999 (Currently in use: 9995-9999)
+
+Please try to limit the claimed space to the least you need. 10 is a reasonable amount for complex mods, while fewer can easily be used with more straightforward mods.
+
+It is reasonable to claim an amount, slightly over what you actually need, to leave room for future expansion. Please do try not to overclaim tho.
+Known mods using non-fixed sequence numbers, and which intervals they use for tickets
+
+If you do not use fixed tickets, please add your mod below. This will help to identify potentially weird behaviour, with multiple mods.Please also note which interval your tickets run from-to.
+
+    "Xango's mods" () : All my mods check all 3 pieces of data received to ensure that what is received is what was asked for, done this say SeqNr does not matter. Xango's SeqNr Solution
+
+Mods that does neither, and both:
+
+    LostInPlaces' EmpyrionAdminTools : Uses a pattern-approach, to generate sequence-requests. Method is explained here
+
+Help finding what you are seeking
+
+The following section consists of two headings:
+
+Requests and Events
+
+A Request is when you 'know what you want to know about':
+
+For instance, if you have a playfield name (Example: 'Eleen' is the playfield (Knowing it is a Eleon.Modding.PString is specified from the entry 'Param data' from below)), and want information on all the entities currently residing on said playfield, you could in your code write:
+
+GameAPI.Game_Request(CmdId.Request_Playfield_Entity_List, (ushort)1, new Eleon.Modding.PString("Eleen"));
+
+This will make the game return you an Event, containing the requested data (see below, the entry 'Corresponding event' is what would be returned.
+
+Requests can also be without a returning event, in the instance where you are Changing something, such as 'Request_Player_AddCredits'.
+
+(These requests technically does return an Event_Ok or an Event_Error, if you want to make sure they were successfull or not. But this is implicit in the list below)
+
+An Event is getting data, either requested, or just 'because it happened ingame'.
+
+An Event will contain different types of data. The entry 'Param data' (Under the event itself!), determines which kind you will be returned.
+
+(You are usually interested in parsing this into an object you can work with, for instance by)
+
+PdaStateInfo Pad = (PdaStateInfo)data;
+
+Note that the Event will always be returned in the Game_Event function, and can be accessed by either its CmdId (event-name), and/or sequence number (shortInt). See above sections, for more on these.
+
+
+
+You can actively send a request. The request may contain some data, that you may need to specify, depending on the request (See 'Param data:' for what is expected/possible)
+
+Once sent, it may trigger an event (See 'Corresponding event' for which. If not specified will return nothing, or simple the 'Event_Ok' or the 'Event_Error'.
+
+Events may be triggered without having to be a response to a request, if something happens in the game, that warrants that event being triggered.
+
+The event will return code in format specified in 'Param data:'. Note, that it will be a 'dummy object' (typeless), that you have to convert.
+
+This should simply be done by
+
+ GlobalStructureList gi = (GlobalStructureList)data
+
+(Example, if the data is expected to be of type 'GlobalStructureList' based on the 'param data' specifying this is the type. (the event Event_GlobalStructure_List for example)
+
+You can from the 'Param data:', see what data is possible to extract from here.
+
+
+
+Finding which are right for your case, is usually easiest by trying several Keyword-searches on the list below, such as for 'PDA', 'Playfield' (...), via browsers ctrl+f (keybinding varies)
+Requests
+Request_Player_List
+
+Description: Retrieves a listing of all online players.
+
+Param data: nothing.
+
+Corresponding event: Event_Player_List
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_List, someNonZeroKey, null);
+
+Request_Player_Info
+
+Description: Retrieves player information. The ID used as a parameter is the entity id, not the Steam id.
+
+Param data: Id
+
+Corresponding event: Event_Player_Info
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_Info, someNonZeroKey, new Eleon.Modding.Id(12345));
+
+12345 being the player's entity ID
+Request_Player_SetPlayerInfo
+
+Description: Set basic information of the player. This is to modify the player's starting playfield, health, stamina, food, oxygen and experience points and so on.
+
+Param data: PlayerInfoSet
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_SetPlayerInfo, someNonZeroKey, new PlayerInfoSet()
+{
+    entityId = 28,
+    oxygenMax = +1000,
+    health = +500,
+    food = +500,
+});
+
+Note: use oxygenMax for oxygen
+Request_Player_GetInventory
+
+Description: Retrieves players inventory. The ID used as a parameter is the entity id, not the Steam id.
+
+Param data: Id
+
+Corresponding event: Event_Player_Inventory
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_GetInventory, someNonZeroKey, new Eleon.Modding.Id(12345));
+
+Request_Player_SetInventory
+
+Description: Sets players inventory. Refer to Param data for what is passed.
+
+Param data: Inventory
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_SetInventory, someNonZeroKey, new Eleon.Modding.Inventory()
+{
+    playerId = 12345,
+    toolbelt = Toolbelt,
+    bag = Bag
+}
+);
+
+Request_Player_AddItem
+
+Description: Adds an item to the player's inventory. Refer to Param data for what is passed.
+
+Param data: ItemStack
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_AddItem, someNonZeroKey, new IdItemStack()
+{
+id = 28,
+itemStack = { id = 490, count = 1, slotIdx = 0, ammo = 0, decay = 0 }
+});
+
+Request_Player_ItemExchange
+
+Description: Sends an inventory to the player (can be empty) which will be shown in a storage-window that opens for the player. The player can take items out of this window or put items into it. After closing the window the items left in that window will be send back as an event.
+
+Param data: ItemExchangeInfo. int id, string title, string description, string buttonText, ItemStack[] items
+
+Corresponding event: Event_Player_ItemExchange
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Player_ItemExchange, someNonZeroKey, new ItemExchangeInfo(playerId, "Gimme Stuff", "Because I said so!", "Here Ya Go", ExchangeItems));
+
+Request_Player_GetAndRemoveInventory
+
+Description: Removes the players inventory and sends all items back that were successfully removed. Items that were droped by the player are not send back, to prevent exploiting this function.
+
+Param data: Id
+
+Corresponding event: Event_Player_GetAndRemoveInventory
+
+Sample:
+Request_Player_Credits
+
+Description: Requests the current credits of the player
+
+Param data: Id
+
+Corresponding event: Event_Player_Credits
+
+Sample:
+Request_Player_SetCredits
+
+Description: Sets the player credits
+
+Param data: IdCredits
+
+Sample:
+Request_Player_AddCredits
+
+Description: Adds credits to the player (+/-)
+
+Param data: IdCredits
+
+Sample:
+Request_Player_ChangePlayerfield
+
+Description: Warps or moves a player. You can change playfield, position and rotation
+
+Param data: IdPlayfieldPositionRotation
+
+Sample:
+
+Note: NOTE! Player MUST BE on a different playfield, than the target, in order to use this request!
+Request_Blueprint_Finish
+
+Description: Finish a started blueprint for the player
+
+Param data: Id
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Blueprint_Finish,someNonZeroKey, new Id(playerId));
+Request_Blueprint_Resources
+
+Description: Adds or replaces the blueprint ressourses of the player
+
+Param data: BlueprintResources
+
+Sample:
+Request_NewEntityId
+
+Description: Request a new entity Id to spawn a new structure
+
+Param data: nothing.
+
+Corresponding event: Event_NewEntityId
+
+Sample:
+Request_Entity_Teleport
+
+Description: Teleports a player or structure on the same playfield (only position and rotation, no playfield change)
+
+Param data: IdPositionRotation
+
+Sample:
+Request_Entity_ChangePlayfield
+
+Description: Warps or moves a structure. You can change playfield, position and rotation.
+
+Note: If you want to teleport a player you have to use "Request_Player_ChangePlayerfield"
+
+Param data: IdPlayfieldPositionRotation
+
+Sample:
+Request_Entity_Destroy
+
+Description: Destroys the structure.
+
+Param data: Id
+
+Sample:
+Request_Entity_Destroy2
+
+Description: Destroys an entity.
+
+Param data: IdPlayfield.
+
+Sample:
+Request_Entity_PosAndRot
+
+Description: Requests the current position and rotation of a player or structure.
+
+Param data: Id
+
+Corresponding event: Event_Entity_PosAndRot
+
+Sample:
+Request_Entity_SetName
+
+Description: Requests to set the name of an entity. (Only structure?)
+
+Param data: IdPlayfieldName
+
+Corresponding event: Nothing.
+
+Sample:
+Request_Entity_Spawn
+
+Description: Spawns a new structure. First you have to retrieve a new entity Id for the structure. The prefabName property in EntitySpawnInfo needs to fit to the selected structure.
+
+note: prefabName is the name of the epb file, for instance
+
+BA_CivilFarm.epb is a blueprint in the default prefabs folder. it has a Group Name "CivilSettlement", and a Blueprint Spawn Name, "Farm"
+
+you would spawn it with the prefabName: BA_CivilFarm
+
+Param data: EntitySpawnInfo
+
+Related commands: Request_NewEntityId, Event_NewEntityId
+
+Sample:
+Request_Playfield_List
+
+Description: Requests all loaded playfields.
+
+Param data: nothing.
+
+Corresponding event: Event_Playfield_List
+
+Sample:
+Request_Playfield_Stats
+
+Description: Requests statistics of the playfield (has to be loaded).
+
+Param data: PString
+
+Corresponding event: Event_Playfield_Stats
+
+Sample:
+Request_Load_Playfield
+
+Description: Requests to load a playfield for a few seconds to be able to send some commands.
+
+Param data: PlayfieldLoad
+
+Corresponding event: Event_Playfield_Loaded
+
+Sample:
+Request_Dedi_Stats
+
+Description: Requests statistics of the current game.
+
+Param data: nothing.
+
+Corresponding event: Event_Dedi_Stats
+
+Sample:
+Request_GlobalStructure_List
+
+Description: Requests all structures and their infos in game per playfield. This includes unloaded playfields.
+
+Param data: nothing.
+
+Corresponding event: Event_GlobalStructure_List
+
+Sample:
+Request_GlobalStructure_Update
+
+Description: Requests all structures of the playfield (has to be loaded).
+
+Param data: PString
+
+Corresponding event: Event_GlobalStructure_List
+
+Sample:
+Request_Structure_Touch
+
+Description: Requests to touch that structure to reset the DecayTime.
+
+Param data: Id
+
+Sample:
+Request_Structure_BlockStatistics
+
+Description: Requests block information of that structure.
+
+Param data: Id
+
+Corresponding event: Event_Structure_BlockStatistics
+
+Sample:
+Request_Get_Factions
+
+Description: Requests all factions from a certain Id onwards. If you want all factions use Id 1.
+
+Param data: Id
+
+Corresponding event: Event_Get_Factions
+
+Sample:
+Request_InGameMessage_SinglePlayer
+
+Description: Sends a message to a player that is shown on the top right of the Hud. A priority can be assigned to highlight the message and alert the player through a sound effect (Like drone messages).
+
+Param data: IdMsgPrio
+
+Sample:
+Request_InGameMessage_Faction
+
+Description: Sends a message to a faction that is shown on the top right of the Hud. A priority can be assigned to highlight the message and alert the faction through a sound effect (Like drone messages).
+
+Param data: IdMsgPrio
+
+Sample:
+Request_InGameMessage_AllPlayers
+
+Description: Sends a message to all player that is shown on the top right of the Hud. A priority can be assigned to highlight the message and alert the players through a sound effect (Like drone messages).
+
+Param data: IdMsgPrio
+
+Sample:
+Request_ShowDialog_SinglePlayer
+
+Description: Sends a message to a player that will be shown as a message box with up to 2 buttons which you can set yourself.
+
+Param data: DialogBoxData
+
+Corresponding event: Event_DialogButtonIndex
+
+Sample:
+
+For Colors: color [c][hexid][-][/c] [c][019245]test[-][/c]
+
+GameAPI.Game_Request(CmdId.Request_ShowDialog_SinglePlayer, someNonZeroKey, new DialogBoxData()
+{
+    Id = 15445,
+    MsgText = "Do you like programming API Mods for Empyrion?",
+    PosButtonText = "I Guess so",
+    NegButtonText = "Certainly Not"
+});
+
+Request_AlliancesAll
+
+Description: Requests all alliance differences (to default).
+
+Param data: nothing.
+
+Corresponding event: Event_AlliancesAll
+
+Sample:
+
+private async Task<bool> AreAllies(int factionId, int testFactionId)
+{
+   if (factionId == testFactionId) return true;
+
+   var allFactions = (await Request_Get_Factions(new Id(0))).factions;
+   var f1 = allFactions.FirstOrDefault(F => F.factionId == factionId);
+   var f2 = allFactions.FirstOrDefault(F => F.factionId == testFactionId);
+
+   var allied = f1.origin == f2.origin;  // default allied
+
+   var allies = await Request_AlliancesAll();
+   var allyTest1 = f1.factionId << 16 | f2.factionId;
+   var allyTest2 = f2.factionId << 16 | f1.factionId;
+
+   if (allies.alliances != null && (allies.alliances.Contains(allyTest1) || allies.alliances.Contains(allyTest2))) allied = !allied; // default changed
+
+   log($"AreAlliesResult:{allied}\n" +
+       $"Routefaction:{factionId}/{GetName(allFactions, factionId)} Origin:{f1.origin} Playerfaction:{testFactionId}/{GetName(allFactions, testFactionId)} Origin:{f2.origin}" +
+       allies.alliances?.Aggregate($"\nFactions:#{allFactions.Count} AlliesChange:#{allies.alliances.Count}", (S, A) => S + $"\nChangeallied:{A >> 16}/{GetName(allFactions, A >> 16)} <=> {A & 0x0000ffff}/{GetName(allFactions, A & 0x0000ffff)}"),
+       LogLevel.Message);
+
+   return allied;
+}
+
+Request_AlliancesFaction
+
+Description: Set the alliance differences (to default) of that faction.
+
+Param data: AlliancesFaction
+
+Corresponding event: Event_AlliancesFaction
+
+Sample:
+Request_ConsoleCommand
+
+Description: Requests to execute a command that also can be send over telnet.
+
+Param data: PString
+
+Sample:
+
+String command = "SAY '" + msg + "'";
+GameAPI.Game_Request(CmdId.Request_ConsoleCommand, (ushort)CmdId.Request_InGameMessage_AllPlayers, new Eleon.Modding.PString(command));
+
+Data-Reference: Console_Commands , Telnet_Commands
+Request_GetBannedPlayers
+
+Description: Requests all banned player information.
+
+Param data: nothing.
+
+Corresponding event: Event_BannedPlayers
+
+Sample:
+Request_Playfield_Entity_List
+
+Description: Requests all entities on a playfield.
+
+Param data: IdPlayfield. [PString]
+
+Corresponding event: Event_Playfield_Entity_List
+
+Sample:
+
+GameAPI.Game_Request(CmdId.Request_Playfield_Entity_List, (ushort)19983, new Eleon.Modding.PString("Eleen"));
+
+Events
+Event_ConsoleCommand
+
+Description: Event Triggered when a consoleCommand is entered (ingame - Things sent through requestconsolecommand doesn't trigger it).
+
+Param data: ConsoleCommandInfo
+Event_Player_Connected
+
+Description: Event Triggered when a player connects.
+
+Param data: Id
+Event_Player_Disconnected
+
+Description: Event Triggered when a player disconnects.
+
+Param data: Id
+Event_Player_List
+
+Description: Lists all online player Id's.
+
+Answer to Request: Request_Player_List.
+
+Param data: IdList
+Event_Player_Info
+
+Description: Returns all information about the player (Name, Playfield, Faction, Inventory, Credits, Health, ...).
+
+Answer to Request: Request_Player_Info.
+
+Param data: PlayerInfo
+Event_Player_Inventory
+
+Description: Returns the inventory of the player.
+
+Answer to Request: Request_Player_GetInventory.
+
+Param data: Inventory
+Event_Player_ItemExchange
+
+Description: Returns the items that the player left in the Item-Exchange window.
+
+Answer to Request: Request_Player_ItemExchange.
+
+Param data: ItemExchangeInfo
+Event_Player_Credits
+
+Description: Returns the player credits.
+
+Answer to Request: Request_Player_Credits.
+
+Param data: IdCredits
+Event_Player_ChangedPlayfield
+
+Description: Triggered when a player changes a playfield.
+
+Param data: IdPlayfield
+Event_Playfield_List
+
+Description: Returns all playfields that are currently loaded.
+
+Answer to Request: Request_Playfield_List.
+
+Param data: PlayfieldList
+Event_Playfield_Stats
+
+Description: Returns current statistics about a playfield
+
+Answer to Request: Request_Playfield_Stats.
+
+Param data: PlayfieldStats
+Event_Playfield_Loaded
+
+Description: Triggered when a playfield is loaded.
+
+Param data: PlayfieldLoad
+Event_Playfield_Unloaded
+
+Description: Triggered when a playfield is unloaded.
+
+Param data: PlayfieldLoad
+Event_Dedi_Stats
+
+Description: Returns current statistics about the game
+
+Answer to Request: Request_Dedi_Stats.
+
+Param data: DediStats
+Event_GameEvent
+
+Description: Triggers on a PDA event
+
+Answer to Request: N/A
+
+Param data: GameEventData
+
+Notes: Possibly broken as of A7.6.1 : No matter what happens in the pda, nothing gets sent to this.
+Event_GlobalStructure_List
+
+Description: Returns all structures and their information per playfield. Depending on the request it sends the information for all playfields (Request_GlobalStructure_List) or only loaded and selected playfields (Request_GlobalStructure_Update).
+
+Answer to Request: Request_GlobalStructure_List and Request_GlobalStructure_Update.
+
+Param data: GlobalStructureList
+Event_Entity_PosAndRot
+
+Description: Returns the player coordinates and rotation.
+
+Answer to Request: Request_Entity_PosAndRot.
+
+Param data: IdPositionRotation
+Event_Faction_Changed
+
+Description: Triggered when a structure changes its faction.
+
+Param data: FactionChangeInfo
+Event_Get_Factions
+
+Description: Returns faction information.
+
+Answer to Request: Request_Get_Factions.
+
+Param data: FactionInfoList
+Event_Statistics
+
+Description: Triggered in different situations. For example on death of a player, on turn on/off of structure, on removing or adding a core.
+
+Param data: StatisticsParam
+
+Details about the usage of the paramdata are found in the ModInterface.cs in the example project.
+Event_NewEntityId
+
+Description: Returns a new unused entity Id which could be used to spawn a new structure.
+
+Answer to Request: Request_NewEntityId.
+
+Param data: Id
+Event_Ok
+
+Description: Answer to every request that does not send a event as an answer. If send, the request was successfully executed.
+
+Param data: nothing
+Event_Error
+
+Description: If a request could not be executed, an error event will be send. The ErrorInfo contains a ErrorType which is descripte in the ModInterface.cs in the example project.
+
+Param data: ErrorInfo
+Event_Player_DisconnectedWaiting
+
+Description: Triggered when a player has problems to login to the server.
+
+Param data: Id
+Event_ChatMessage
+
+Description: Triggered when a player writes a chat.
+
+Param data: ChatInfo
+Event_Structure_BlockStatistics
+
+Description: Returns all blocks of a structure.
+
+Answer to Request: Request_Structure_BlockStatistics.
+
+Param data: IdStructureBlockInfo
+Event_AlliancesAll
+
+Description: Returns all alliances (the differences). See example project on how to get the information.
+
+Answer to Request: Request_AlliancesAll.
+
+Param data: AlliancesTable
+Event_AlliancesFaction
+
+Description: Returns all alliances (the differences) for that faction. See example project on how to get the information.
+
+Answer to Request: Request_AlliancesFaction.
+
+Param data: AlliancesFaction
+Event_BannedPlayers
+
+Description: Returns all banned players.
+
+Answer to Request: Request_GetBannedPlayers.
+
+Param data: BannedPlayerData
+Event_TraderNPCItemSold
+
+Description: Triggered when a player buys something from a NPC-Trader
+
+Param data: TraderNPCItemSoldInfo
+Event_Player_GetAndRemoveInventory
+
+Description: Returns the current inventory that was removed from the player (only items that the game could remove. Items that the player dropped are not listed)
+
+Answer to Request: Request_Player_GetAndRemoveInventory.
+
+Param data: Inventory
+Event_PdaStateChange
+
+Description: PDA chapter activated/deactivated/completed
+
+Answer to Request: N/A
+
+Param data: PdaStateInfo
+Event_Playfield_Entity_List
+
+Description: Returns all entitys of a playfield.
+
+Answer to Request: Request_Playfield_Entity_List
+
+Param data: PlayfieldEntityList
+Event_DialogButtonIndex
+
+Description: Returns the state of the clicked button
+
+Answer to Request: Request_ShowDialog_SinglePlayer
+
+Param data: IdAndIntValue 

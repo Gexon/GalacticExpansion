@@ -1,0 +1,35 @@
+
+Game API ModInterface
+
+Index: GameAPI
+Contents
+
+    1 ModInterface
+        1.1 void Game_Start(ModGameAPI dediAPI);
+        1.2 void Game_Update();
+        1.3 void Game_Event(CmdId eventId, ushort seqNr, object data);
+        1.4 void Game_Exit();
+
+ModInterface
+
+Interface Empyrion will use to access your mod. This is what Empyrion will call from your DLL. All mod DLLs must have this interface implemented in their DLL for Empyrion to recognise the mod.
+void Game_Start(ModGameAPI dediAPI);
+
+This is called when the game starts. The ModGameAPI that is passed will be used by your mod for communication with the game
+void Game_Update();
+
+It is during the invocation of this function that you are allowed to submit to the ModGameAPI using the Game_Request function.
+
+This occurs on every game_update (tick)
+void Game_Event(CmdId eventId, ushort seqNr, object data);
+
+This is called by the game when a qualifying event is triggered. Note that the prototype for this function is the same as Game_Request. The arguments to the function describe the event that has occurred in the game.
+Parameter 	Description
+CmdId eventId 	Enum representing what event was triggered.
+ushort seqNr 	When related to a request, this will match the corresponding request's sequence number.
+object data 	Additional information that may be relevant. See CmdId for more detail.
+
+You can also submit to the ModGameAPI using the Game_Request function, from here.
+void Game_Exit();
+
+This is called on exit, and is a signal that you should dispose/clean up any resources that were in use 

@@ -71,40 +71,53 @@ Colony {Id}: Transitioning from LandingPending to Base1 [VIRTUAL]
 
 ---
 
-### 3. Материализация колонии (с retry-логикой)
+### 3. Материализация колонии (из Game_Update в PfServer процессе)
 
-Материализация происходит в два этапа для решения проблемы `PlayfieldConnectionNotFound`:
+Материализация решает проблему многопроцессной архитектуры Empyrion:
 
-#### Этап 1: Пометка для материализации (IModApi.OnPlayfieldLoaded)
+**Критическая проблема архитектуры:**
+- Мод загружается в **ДВА процесса**: `Dedi` (главный сервер) и `PfServer` (playfield сервер)
+- Spawn-операции работают **ТОЛЬКО из PfServer процесса** (у которого есть playfield connection)
+- `SimulationEngine` работает в `Task.Run` в **Dedi процессе** → `PlayfieldConnectionNotFound`
+- **Решение**: вызывать материализацию из `Game_Update()` (правильный поток в PfServer)
 
-При загрузке playfield через событие `IModApi.Application.OnPlayfieldLoaded` вызывается `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`:
+#### Этап 1: Пометка для материализации (Event_Playfield_Loaded)
 
-1. **Правильное событие**: `IModApi.OnPlayfieldLoaded` срабатывает когда playfield **полностью готов** для операций спавна (в отличие от `Event_Playfield_Loaded` который срабатывает слишком рано)
+При загрузке playfield через событие `Event_Playfield_Loaded` вызывается `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`:
+
+1. **Event_Playfield_Loaded** срабатывает когда playfield **начинает загружаться**
 2. **Проверка виртуальности**: Если `colony.IsVirtual == true`
 3. **Пометка для отложенного спавна**: 
    - `colony.PendingMaterialization = true`
-   - `colony.MaterializationAttempts = 0`
-4. **Без немедленного спавна** - используем retry-логику для надёжности
+   - `colony.MaterializationAttempts = 0` (начинаем с 0)
+4. **Без немедленного спавна** - используем retry-логику из `Game_Update()`
 
-#### Этап 2: Retry-логика материализации (каждый тик)
+#### Этап 2: Retry-логика материализации (из ModMain.Game_Update)
 
-В каждом тике симуляции `ColonyTickModule` вызывает `TryMaterializePendingColoniesAsync`:
+**КРИТИЧНО**: Вызывается из `ModMain.Game_Update()` (НЕ из SimulationEngine!)
 
 1. **Поиск колоний с `PendingMaterialization == true`**
 
-2. **Попытка материализации** (до 10 раз):
-   - Счетчик `MaterializationAttempts++`
-   - Вызов `StageManager.MaterializeColonyAsync(colony)`
+2. **Активная проверка готовности плейфилда** через `IsPlayfieldReadyAsync`:
+   - Делается запрос `Request_Playfield_Stats` (работает только когда playfield загружен)
+   - Таймаут 2 секунды
+   - Если запрос успешен → плейфилд готов, переход к шагу 3
+   - Если ошибка → плейфилд ещё загружается, повтор в следующем Game_Update
 
-3. **При успехе**:
+3. **Попытка материализации** (когда плейфилд готов, до 100 попыток):
+   - Счетчик `MaterializationAttempts++` (1, 2, 3... до 100)
+   - Вызов `StageManager.MaterializeColonyAsync(colony)`
+   - **ВАЖНО**: `EntitySpawnInfo.playfield` заполняется правильно!
+
+4. **При успехе**:
    - `colony.IsVirtual = false`
    - `colony.PendingMaterialization = false`
    - `colony.MaterializationAttempts = 0`
 
-4. **При ошибке** (PlayfieldConnectionNotFound):
+5. **При ошибке** (любая ошибка во время материализации):
    - Логирование попытки
-   - Повтор в следующем тике (до 10 попыток)
-   - После 10 неудачных попыток - отказ
+   - Повтор в следующем Game_Update (каждую секунду)
+   - После 100 неудачных попыток - отказ
 
 **Процесс материализации (в StageManager):**
 
@@ -129,16 +142,20 @@ Colony {Id}: Transitioning from LandingPending to Base1 [VIRTUAL]
 ```
 # Пометка для материализации
 EnsurePlayfieldColoniesSpawned: playfield 'Temperate Planet', 1 colony(ies)
-Virtual colony {Id} marked for materialization (will retry in next ticks)
+Virtual colony {Id} marked for materialization (playfield readiness will be checked)
 
-# Retry-попытки (каждый тик)
+# Проверка готовности плейфилда (из Game_Update в PfServer процессе)
 TryMaterializePendingColonies: 1 colony(ies) pending materialization
-Attempting to materialize colony {Id} (attempt 1/10)
-Materialization attempt 1 failed for colony {Id}: PlayfieldConnectionNotFound
+Checking playfield 'Temperate Planet' readiness for colony {Id} (attempt 1/100)
+Playfield 'Temperate Planet' not ready yet: PlayfieldOfPlayerNotFound
+[Повтор в следующем Game_Update - ~1 секунда]
 
-Attempting to materialize colony {Id} (attempt 2/10)
+Checking playfield 'Temperate Planet' readiness for colony {Id} (attempt 2/100)
+Playfield 'Temperate Planet' is READY (Request_Playfield_Stats succeeded)
+Attempting to materialize colony {Id} (attempt 2/100)
 Materializing virtual colony {Id} on 'Temperate Planet'...
 Found suitable location for colony {Id} at (1234.5, 100.0, -567.8)
+Spawning structure 'BA_ConstructionSite' at (1234.5, 100.0, -567.8) on playfield 'Temperate Planet'
 Colony {Id} materialized successfully with structure {structureId} at (1234.5, 100.0, -567.8)
 ✅ Colony {Id} materialized successfully on attempt 2
 ```
@@ -322,26 +339,27 @@ Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
 Task TryMaterializePendingColoniesAsync();
 ```
 
-### ModMain (IModApi Integration)
+### ColonyTickModule
 
 ```csharp
-// В IMod.Init(IModApi modAPI)
-public void Init(IModApi modAPI)
+// Подписка на Event_Playfield_Loaded
+public async Task InitializeAsync(SimulationState state)
 {
-    _extendedModApi = modAPI;
+    // ... создание виртуальной колонии ...
     
-    // Подписка на правильное событие загрузки playfield
-    modAPI.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
+    _gateway.GameEventReceived += OnGameEvent;
 }
 
 // Обработчик события
-private void OnPlayfieldLoaded(IPlayfield playfield)
+private void OnGameEvent(object? sender, GameEventArgs e)
 {
-    var playfieldName = playfield.Name;
+    if (e.EventId != CmdId.Event_Playfield_Loaded)
+        return;
+
+    var playfieldName = GetPlayfieldNameFromEventData(e.Data);
     
-    // Получаем ColonyManager и запускаем материализацию
-    var colonyManager = _container.Resolve<IColonyManager>();
-    _ = Task.Run(() => colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfieldName));
+    // Запускаем материализацию с задержкой
+    _ = Task.Run(() => _colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfieldName));
 }
 ```
 
@@ -498,15 +516,20 @@ DEBUG | ColonyManager: updating colony abc123 (Temperate Planet, stage=Base1, dt
 INFO  | Colony abc123: Transitioning from LandingPending to Base1 [VIRTUAL]
 ```
 
-### Материализация (через IModApi.OnPlayfieldLoaded)
+### Материализация (Event_Playfield_Loaded + задержка 3 секунды)
 ```
-# Событие загрузки playfield (IModApi)
-INFO  | 🎯 IModApi.OnPlayfieldLoaded: 'Temperate Planet' is now READY for spawn operations
+# Событие загрузки playfield
+INFO  | ColonyTickModule: Playfield_Loaded 'Temperate Planet' - ensuring colonies on playfield
 INFO  | EnsurePlayfieldColoniesSpawned: playfield 'Temperate Planet', 1 colony(ies)
-INFO  | Virtual colony abc123 marked for materialization (will retry in next ticks)
+INFO  | Virtual colony abc123 marked for materialization (will retry after 3s delay)
 
-# Retry-попытки (обычно успех с первой попытки)
+# Задержка 3 секунды (ожидание готовности playfield)
 DEBUG | TryMaterializePendingColonies: 1 colony(ies) pending materialization
+DEBUG | Colony abc123 waiting... (3s remaining)
+DEBUG | Colony abc123 waiting... (2s remaining)
+DEBUG | Colony abc123 waiting... (1s remaining)
+
+# Retry-попытки материализации (после задержки)
 DEBUG | Attempting to materialize colony abc123 (attempt 1/10)
 INFO  | Materializing virtual colony abc123 on 'Temperate Planet'...
 INFO  | Found suitable location for colony abc123 at (1234.5, 100.0, -567.8)
@@ -526,52 +549,56 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 
 ---
 
-## Retry-логика материализации
+## Retry-логика материализации с задержкой
 
-### Зачем нужна retry-логика?
+### Зачем нужна задержка?
 
-Хотя `IModApi.OnPlayfieldLoaded` срабатывает когда playfield готов, мы используем retry-логику для дополнительной надёжности и обработки edge-cases.
+Проблема `PlayfieldConnectionNotFound` возникает потому что `Event_Playfield_Loaded` срабатывает когда playfield **начинает загружаться**, но ещё **НЕ готов** для операций спавна через ModAPI.
 
 ### Исправление проблемы PlayfieldConnectionNotFound
 
 **Старый подход (❌ НЕ работал):**
-- Использовался `Event_Playfield_Loaded` (через `CmdId.Event_Playfield_Loaded`)
-- Срабатывал **слишком рано** - playfield начинал загружаться, но не был готов для спавна
-- **Single-player проблема:** `Event_Player_ChangedPlayfield` не срабатывает в single-player режиме (баг Empyrion API)
+- Немедленная материализация при `Event_Playfield_Loaded`
 - Результат: все попытки спавна провалились с `PlayfieldConnectionNotFound`
 
+**Попытка использовать IModApi.OnPlayfieldLoaded (❌ НЕ сработало):**
+- Событие `IModApi.Application.OnPlayfieldLoaded` теоретически правильное
+- **НО** в local dedicated режиме playfield запускается в **отдельном процессе**
+- Событие срабатывает в контексте playfield процесса, а НЕ в dedicated server процессе
+- Мод инициализирован в dedicated процессе → событие не доходит
+
 **Новый подход (✅ РАБОТАЕТ):**
-- Используется `IModApi.Application.OnPlayfieldLoaded` (расширенный API)
-- Срабатывает когда playfield **полностью готов** для всех операций
-- **Работает в single-player и на dedicated server**
-- Retry-логика нужна только для edge-cases и дополнительной надёжности
+- Используем `Event_Playfield_Loaded` (доступно в dedicated процессе)
+- **Добавляем задержку 3 секунды** перед первой попыткой материализации
+- Retry-логика с до 10 попыток после задержки
+- Итого: 3с задержка + 10с максимум попыток = до 13 секунд
 
-### Как работает retry-логика?
+### Как работает retry-логика с задержкой?
 
-1. **При IModApi.OnPlayfieldLoaded:**
-   - Playfield гарантированно готов, но мы всё равно помечаем колонию: `PendingMaterialization = true`
-   - Это даёт дополнительную защиту от race conditions
+1. **При Event_Playfield_Loaded:**
+   - Playfield начал загружаться (ещё не готов)
+   - Помечаем колонию: `PendingMaterialization = true`
+   - Устанавливаем задержку: `MaterializationAttempts = -3` (3 секунды)
 
-2. **Каждый тик симуляции (1 раз в секунду):**
-   - `TryMaterializePendingColoniesAsync` проверяет помеченные колонии
-   - Пытается материализовать каждую (до 10 попыток)
-   - При успехе — сбрасывает флаги и счетчик
+2. **Задержка (первые 3 тика):**
+   - `MaterializationAttempts < 0` → пропускаем попытку материализации
+   - `MaterializationAttempts++` → `-3 → -2 → -1 → 0`
+   - Логируется оставшееся время ожидания
 
-3. **При неудаче (редко):**
-   - `MaterializationAttempts++`
-   - Логируется попытка (DEBUG уровень)
-   - Повтор в следующем тике
+3. **Попытки материализации (после задержки, до 10 раз):**
+   - `MaterializationAttempts >= 0` → пытаемся материализовать
+   - При успехе — сбрасываем флаги
+   - При ошибке — повтор в следующем тике
 
 4. **После 10 неудачных попыток:**
-   - `PendingMaterialization = false` — отказ от материализации
-   - Логируется предупреждение (WARN уровень)
+   - `PendingMaterialization = false` — отказ
    - Колония остается виртуальной
 
 ### Параметры retry
-- **Максимум попыток:** 10
-- **Интервал между попытками:** 1 секунда (частота тика симуляции)
-- **Общее время ожидания:** до 10 секунд
-- **Ожидаемые попытки:** 1-2 (playfield уже готов после OnPlayfieldLoaded)
+- **Начальная задержка:** 3 секунды (ожидание готовности playfield)
+- **Максимум попыток:** 10 (после задержки)
+- **Интервал между попытками:** 1 секунда
+- **Общее время ожидания:** до 13 секунд (3с задержка + 10с попытки)
 
 ## Известные ограничения
 
@@ -579,7 +606,58 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 2. **Игрок не может атаковать виртуальные колонии** (структур нет в мире)
 3. **Виртуальные охранники не патрулируют** (спавнятся только при материализации)
 4. **Позиция виртуальной колонии `(0, 0, 0)`** не имеет смысла до материализации
-5. **Материализация может занять до 10 секунд** при проблемах с playfield
+5. **Задержка материализации:** минимум 3 секунды после входа игрока на playfield
+6. **Максимальное время материализации:** до 13 секунд (3с задержка + 10с попыток)
+
+## Технические детали решения проблемы PlayfieldConnectionNotFound
+
+### Почему IModApi.OnPlayfieldLoaded не сработало?
+
+В **local dedicated режиме** (запуск dedicated server локально на ПК игрока):
+- Playfield серверы запускаются как **отдельные процессы** (`Empyrion.exe -playfieldserver`)
+- Событие `IModApi.Application.OnPlayfieldLoaded` срабатывает в контексте **playfield процесса**
+- Мод инициализирован в **dedicated процессе** → событие не доходит
+- Результат: подписка успешна (`✅ Subscribed`), но обработчик никогда не вызывается
+
+### Почему материализация из Game_Update() работает?
+
+**Критическая архитектурная особенность Empyrion:**
+
+1. **Многопроцессная архитектура** (`Info.yaml.txt`, `ModTargets`):
+   - `Dedi` = Dedicated server Main process (chat, API1, основная логика)
+   - `PfServer` = Playfield process (**Entity info, spawning**)
+   - Мод загружается **в оба процесса** если указан `ModTargets: Dedi, PfServer`
+
+2. **Проблема PlayfieldConnectionNotFound:**
+   - Spawn-операции работают **ТОЛЬКО из PfServer процесса**
+   - `SimulationEngine` работает в `Task.Run` в **Dedi процессе** → нет playfield connection
+   - Результат: `PlayfieldConnectionNotFound` даже если playfield загружен
+
+3. **Решение - Game_Update():**
+   - `Game_Update()` вызывается игрой в **правильном контексте потока**
+   - В PfServer процессе → есть доступ к playfield connections
+   - `Request_Playfield_Stats` проверяет готовность (работает только когда playfield загружен)
+   - Retry до 100 попыток (100 секунд) для максимальной надёжности
+   - **Работает в local dedicated и на full dedicated server**
+
+4. **Дополнительно - EntitySpawnInfo.playfield:**
+   - Поле `playfield` в `EntitySpawnInfo` ОБЯЗАТЕЛЬНО заполняется
+   - Указывает игре "на каком playfield спавнить"
+   - Без этого поля spawn может пойти не на тот playfield или упасть
+
+### Известные баги Empyrion (НЕ связаны с модом)
+
+**1. NullReferenceException в PaneList.RemoveEditor:**
+- Краш dedicated server при старте
+- Происходит в `Assembly-CSharp.PaneList.RemoveEditor()`
+- Баг самого Empyrion, не связан с модом
+- Обходное решение: перезапуск сервера
+
+**2. Event_Player_ChangedPlayfield не работает в single-player:**
+- Подтверждённый баг Empyrion API (по словам разработчика мода EmpyrionScripting)
+- Событие не срабатывает в single-player режиме
+- На dedicated server работает нормально
+- Поэтому используем `Event_Playfield_Loaded` вместо событий игрока
 
 ---
 

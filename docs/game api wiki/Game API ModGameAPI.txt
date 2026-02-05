@@ -1,0 +1,34 @@
+Game API ModGameAPI
+
+Index: GameAPI
+Contents
+
+    1 ModGameAPI
+        1.1 void Console_Write(string txt);
+        1.2 ulong Game_GetTickTime();
+        1.3 bool Game_Request(CmdId reqId, ushort seqNr, object data);
+        1.4 ulong Debug_GetLastPackageReceivedTickTime(int clientId);
+        1.5 bool Debug_GetNwStatistics(int clientId, out int bytesReceived, out int packagesReceived, out int bytesSent, out int packagesSent);
+        1.6 float Debug_GetFps();
+
+ModGameAPI
+
+This is the Interface for you to send requests and calls to Empyrion.
+void Console_Write(string txt);
+
+This will write the provided string to the server's log file
+ulong Game_GetTickTime();
+
+This get's the game's current tick, and be used for game time comparison and assesment
+bool Game_Request(CmdId reqId, ushort seqNr, object data);
+
+This submits a request to the game. Note that the bool only indicates whether or not there was an error in the call, the response to requests will be provided as calls to the Game_Event function.
+ulong Debug_GetLastPackageReceivedTickTime(int clientId);
+
+....dunno
+bool Debug_GetNwStatistics(int clientId, out int bytesReceived, out int packagesReceived, out int bytesSent, out int packagesSent);
+
+....I haven't used this at all
+float Debug_GetFps();
+
+I really have no idea what this is in the context of the server 
