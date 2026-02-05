@@ -30,10 +30,16 @@ namespace GalacticExpansion.Core.Simulation
         Task RemoveColonyAsync(string colonyId);
 
         /// <summary>
-        /// При загрузке playfield (Event_Playfield_Loaded): материализация виртуальных колоний и обновление/защита структур.
-        /// Виртуальные колонии материализуются (спавнятся структуры), существующие - получают Touch от decay.
+        /// При загрузке playfield (Event_Playfield_Loaded): помечает виртуальные колонии для материализации.
+        /// Фактическая материализация происходит через TryMaterializePendingColoniesAsync (retry-логика).
         /// </summary>
         /// <param name="playfield">Имя загруженного playfield.</param>
         Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
+
+        /// <summary>
+        /// Пытается материализовать колонии, помеченные для материализации (retry-логика).
+        /// Вызывается каждый тик. При ошибке PlayfieldConnectionNotFound повторяет попытки до 10 раз.
+        /// </summary>
+        Task TryMaterializePendingColoniesAsync();
     }
 }

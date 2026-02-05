@@ -35,12 +35,26 @@
 - При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo` (поле `errorType` — enum `ErrorType`).
 - Шлюз в `HandleEvent` обрабатывает Event_Error до попытки завершить ответ ожидаемым типом: извлекает текст из `ErrorInfo` (в т.ч. `errorType.ToString()` для понятного кода в логах), вызывает `SequenceManager.CompleteWithError(seqNr, exception)` — вызывающий получает исключение вместо "Type mismatch".
 
-### Playfield Load Handling (Event_Playfield_Loaded)
-- Событие `CmdId.Event_Playfield_Loaded` приходит с данными типа `PlayfieldLoad` (Mif/Eleon.Modding) с полями `sec`, `playfield`, `processId`.
-- `ColonyTickModule` подписан на `IEmpyrionGateway.GameEventReceived` и при `Event_Playfield_Loaded`:
-  - Извлекает имя playfield из объекта `PlayfieldLoad`.
-  - Если это `HomePlayfield` и state пустой (и экспансия включена) — создаёт первую колонию только после загрузки этого playfield (никакого спавна в незагруженный playfield).
-  - Для любого playfield вызывает `IColonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield)` — обновление/защита уже существующих структур колоний на этом playfield, база для дальнейшего спавна виртуальных структур/юнитов при загрузке playfield или входе игрока.
+### Playfield Load Handling & Colony Virtualization (Phase 3 — ОБНОВЛЕНО)
+
+**Виртуализация колоний** — ключевой паттерн для надёжного создания и развития колоний:
+
+1. **Создание виртуальной колонии** (при старте мода):
+   - Не зависит от событий — создаётся сразу в `ColonyTickModule.InitializeAsync`
+   - `IsVirtual = true`, без физических структур
+   - Развивается в БД: ресурсы, юниты, переходы стадий
+
+2. **Материализация** (Event_Playfield_Loaded + retry):
+   - Событие `CmdId.Event_Playfield_Loaded` → пометка `PendingMaterialization = true`
+   - Каждый тик: `TryMaterializePendingColoniesAsync` (до 10 попыток)
+   - При успехе: спавн структур, `IsVirtual = false`
+   - Решает проблему `PlayfieldConnectionNotFound` (playfield еще не готов)
+
+3. **EnsurePlayfieldColoniesSpawnedAsync:**
+   - Помечает виртуальные колонии для материализации
+   - Защищает (Touch) структуры материализованных колоний
+
+**Данные события:** `PlayfieldLoad` (Mif/Eleon.Modding) — поля `sec`, `playfield`, `processId`
 
 ## Важные инварианты
 
@@ -49,3 +63,5 @@
 3. Rate limiting обязателен для ModAPI запросов.
 4. Спавн структур и NPC идет через `IEntitySpawner`.
 5. Переходы стадий всегда сопровождаются синхронизацией state.
+6. **Виртуальные колонии:** физические операции (спавн, Touch, destroy) запрещены; только обновление моделей в БД.
+7. **Материализация:** обязательно через retry-логику (до 10 попыток) для решения `PlayfieldConnectionNotFound`.

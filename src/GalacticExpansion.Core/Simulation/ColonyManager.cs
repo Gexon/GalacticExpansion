@@ -108,7 +108,7 @@ namespace GalacticExpansion.Core.Simulation
         /// </summary>
         /// <summary>
         /// При загрузке playfield вызывается из ColonyTickModule по Event_Playfield_Loaded.
-        /// Материализует виртуальные колонии (спавнит структуры) и обновляет/защищает структуры существующих колоний.
+        /// Помечает виртуальные колонии для материализации (отложенный спавн через retry-логику).
         /// </summary>
         public async Task EnsurePlayfieldColoniesSpawnedAsync(string playfield)
         {
@@ -127,29 +127,87 @@ namespace GalacticExpansion.Core.Simulation
             
             foreach (var colony in coloniesOnPlayfield)
             {
-                try
+                // Если колония виртуальная - помечаем для материализации (отложенный спавн)
+                if (colony.IsVirtual && !colony.PendingMaterialization)
                 {
-                    // Если колония виртуальная - материализуем её
-                    if (colony.IsVirtual)
+                    colony.PendingMaterialization = true;
+                    colony.MaterializationAttempts = 0;
+                    _logger.Info($"Virtual colony {colony.Id} marked for materialization (will retry in next ticks)");
+                }
+                else if (!colony.IsVirtual)
+                {
+                    // Если уже материализована - защищаем структуры
+                    try
                     {
-                        _logger.Info($"Materializing virtual colony {colony.Id} on '{playfield}'...");
-                        await _stageManager.MaterializeColonyAsync(colony);
-                        _logger.Info($"Colony {colony.Id} materialized successfully");
-                    }
-                    else
-                    {
-                        // Если уже материализована - просто защищаем структуры
                         await _stageManager.MaintainColonyStructuresAsync(colony);
                     }
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error(ex, $"EnsurePlayfieldColoniesSpawned: error processing colony {colony.Id} on {playfield}");
+                    catch (Exception ex)
+                    {
+                        _logger.Error(ex, $"Error maintaining colony {colony.Id} structures");
+                    }
                 }
             }
             
-            // Сохраняем изменения (IsVirtual флаги обновлены)
+            // Сохраняем изменения (PendingMaterialization флаги обновлены)
             await _stateStore.SaveAsync(state);
+        }
+
+        /// <summary>
+        /// Пытается материализовать колонии, помеченные для материализации (retry-логика).
+        /// Вызывается каждый тик из ColonyTickModule.
+        /// </summary>
+        public async Task TryMaterializePendingColoniesAsync()
+        {
+            var state = await _stateStore.LoadAsync();
+            var pendingColonies = state.Colonies
+                .Where(c => c.IsVirtual && c.PendingMaterialization)
+                .ToList();
+
+            if (pendingColonies.Count == 0)
+                return;
+
+            _logger.Debug($"TryMaterializePendingColonies: {pendingColonies.Count} colony(ies) pending materialization");
+
+            bool stateChanged = false;
+
+            foreach (var colony in pendingColonies)
+            {
+                const int maxAttempts = 10; // Максимум 10 попыток (10 секунд)
+
+                if (colony.MaterializationAttempts >= maxAttempts)
+                {
+                    _logger.Warn($"Colony {colony.Id} failed to materialize after {maxAttempts} attempts. Giving up.");
+                    colony.PendingMaterialization = false;
+                    stateChanged = true;
+                    continue;
+                }
+
+                colony.MaterializationAttempts++;
+
+                try
+                {
+                    _logger.Debug($"Attempting to materialize colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
+                    await _stageManager.MaterializeColonyAsync(colony);
+                    
+                    // Успех!
+                    colony.PendingMaterialization = false;
+                    colony.MaterializationAttempts = 0;
+                    stateChanged = true;
+                    
+                    _logger.Info($"✅ Colony {colony.Id} materialized successfully on attempt {colony.MaterializationAttempts}");
+                }
+                catch (Exception ex)
+                {
+                    // Ошибка - попробуем в следующий тик
+                    _logger.Debug($"Materialization attempt {colony.MaterializationAttempts} failed for colony {colony.Id}: {ex.Message}");
+                    stateChanged = true; // Обновляем счетчик попыток
+                }
+            }
+
+            if (stateChanged)
+            {
+                await _stateStore.SaveAsync(state);
+            }
         }
 
         /// <summary>

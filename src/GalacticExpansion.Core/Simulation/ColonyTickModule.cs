@@ -174,6 +174,17 @@ namespace GalacticExpansion.Core.Simulation
         /// <inheritdoc/>
         public void OnSimulationUpdate(SimulationContext context)
         {
+            // 1. Попытка материализации отложенных колоний (retry-логика)
+            try
+            {
+                _colonyManager.TryMaterializePendingColoniesAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "ColonyTickModule: error in TryMaterializePendingColonies");
+            }
+
+            // 2. Обновление колоний
             if (context?.CurrentState?.Colonies == null || context.CurrentState.Colonies.Count == 0)
             {
                 _logger.Debug("ColonyTickModule: no colonies to update");

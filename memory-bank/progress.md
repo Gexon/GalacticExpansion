@@ -2,18 +2,45 @@
 
 ## Текущий статус
 
-**Дата обновления:** 03.02.2026  
-**Phase 3 (Domain):** завершена — логика, тесты, runtime (ColonyTickModule, первая колония по Event_Playfield_Loaded, обновление по тику)  
+**Дата обновления:** 05.02.2026  
+**Phase 3 (Domain):** ✅ ЗАВЕРШЕНА с системой виртуализации колоний  
 **Phase 4 (Combat):** не начата
 
 ## Недавний прогресс
 
-- **Runtime Phase 3:** ColonyTickModule при пустом state и включённой экспансии ждёт `Event_Playfield_Loaded` (тип данных `PlayfieldLoad`) для `HomePlayfield` и создаёт первую колонию только после загрузки нужного playfield; далее обновляет колонии по тику через ColonyManager.
-- **EmpyrionGateway:** обработка `CmdId.Event_Error` — завершение ожидающего запроса через `CompleteWithError` с текстом из `ErrorInfo` (в т.ч. `errorType`), чтобы в логах и исключениях был понятный код ошибки.
-- **PlacementResolver:** поздняя установка `IModApi` через `SetModApi` в ModMain.Init.
-- **Конфиг:** дефолтные Zirax.Stages/DropShips с ванильными префабами в ConfigurationLoader; StageManager использует префаб из конфига или BA_ConstructionSite.
-- **Документация:** инструкция для тестера в `docs/manuals/Tester_Manual_Colony_Access.md`.
-- Исправлены unit/integration тесты (SimulationEngine `LoadAsync` как минимум 2 раза, последующие вызовы при тиках; PlacementResolver GlobalStructureList; StageManager/EntitySpawner контракты).
+### 🎉 Система виртуализации колоний (Colony Virtualization) — РЕАЛИЗОВАНО
+
+**Задача:** Решить проблему создания колоний и `PlayfieldConnectionNotFound` при спавне структур.
+
+**Реализация:**
+- **Модель Colony:** добавлены поля `IsVirtual`, `PendingMaterialization`, `MaterializationAttempts`
+- **ColonyTickModule:** создание виртуальной колонии при старте мода (`CreateInitialVirtualColonyAsync`)
+  - Не зависит от событий игрока — колония создается сразу!
+  - Каждый тик вызывает `TryMaterializePendingColoniesAsync` (retry-логика)
+- **ColonyManager:**
+  - `EnsurePlayfieldColoniesSpawnedAsync` — помечает виртуальные колонии при `Event_Playfield_Loaded`
+  - `TryMaterializePendingColoniesAsync` — retry-логика материализации (до 10 попыток)
+  - `UpdateColonyAsync` — виртуальные колонии развиваются без физических операций
+- **StageManager:**
+  - `InitializeColonyAsync(isVirtual)` — создание виртуальных колоний без спавна
+  - `MaterializeColonyAsync` — материализация с поиском позиции и спавном структур
+  - Виртуальные переходы между стадиями (без физического спавна/удаления)
+
+**Результат:**
+- ✅ Виртуальная колония создается при старте мода
+- ✅ Развивается виртуально (ресурсы, юниты, стадии)
+- ✅ Материализуется при загрузке playfield с retry-логикой
+- ✅ Решает проблему `PlayfieldConnectionNotFound`
+
+**Документация:** `docs/architecture/11_Colony_Virtualization.md`
+
+### Прочие изменения Phase 3
+
+- **EmpyrionGateway:** обработка `CmdId.Event_Error` с извлечением `ErrorType`
+- **PlacementResolver:** поздняя установка `IModApi` через `SetModApi`
+- **ConfigurationLoader:** дефолтные префабы для Zirax.Stages/DropShips
+- **Документация:** инструкция для тестера `docs/manuals/Tester_Manual_Colony_Access.md`
+- Исправлены все unit/integration тесты
 
 ## Тестирование
 
@@ -23,11 +50,25 @@
 
 ## Что работает
 
-- Core Loop, Gateway, State Store, Trackers — стабильно.
-- Phase 3 Domain: Spawning, Placement, Economy, Unit Economy, StageManager, ColonyManager — тесты проходят.
-- Создание первой колонии по `Event_Playfield_Loaded` для `HomePlayfield` (при включённой экспансии в конфиге) и обновление колоний по тику симуляции.
+### ✅ Phase 1-2 (Foundation & Core Loop)
+- Core Loop, Gateway, State Store, Trackers — стабильно
+
+### ✅ Phase 3 (Domain) — ЗАВЕРШЕНА
+- **Spawning & Evolution:** EntitySpawner, StageManager с поддержкой виртуализации
+- **Placement:** PlacementResolver с IModApi для определения высоты
+- **Economy:** EconomySimulator, UnitEconomyManager
+- **Colony Management:** ColonyManager с системой виртуализации
+- **Colony Virtualization:** полный цикл от создания виртуальной колонии до материализации
+- **ColonyTickModule:** создание виртуальных колоний при старте, retry-логика материализации
+
+### 🎯 Ключевые возможности
+1. Виртуальные колонии создаются при старте мода (независимо от игрока)
+2. Виртуальное развитие: ресурсы, юниты, переходы стадий
+3. Материализация при загрузке playfield с retry-логикой (до 10 попыток)
+4. Решение проблемы `PlayfieldConnectionNotFound`
 
 ## Что дальше
 
-1. Phase 3.5: server testing на dedicated server (deploy → проверка логов, появление колоний, спавн структур; при Event_Error — смотреть код ErrorType в логах).
-2. Phase 4: Threat Director + AIM Orchestrator (по архитектурной документации).
+1. **Тестирование виртуализации:** проверка полного цикла создание → развитие → материализация → спавн
+2. Phase 3.5: server testing на dedicated server (мультиплеер, нагрузочное тестирование)
+3. Phase 4: Threat Director + AIM Orchestrator (реакция на действия игроков)

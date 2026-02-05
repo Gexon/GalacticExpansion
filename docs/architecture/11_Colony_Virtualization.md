@@ -71,15 +71,43 @@ Colony {Id}: Transitioning from LandingPending to Base1 [VIRTUAL]
 
 ---
 
-### 3. Материализация колонии
+### 3. Материализация колонии (с retry-логикой)
 
-Материализация происходит при загрузке playfield (`Event_Playfield_Loaded`) через `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`.
+Материализация происходит в два этапа для решения проблемы `PlayfieldConnectionNotFound`:
 
-**Процесс материализации:**
+#### Этап 1: Пометка для материализации (Event_Playfield_Loaded)
 
-1. **Проверка виртуальности**: Если `colony.IsVirtual == true`, вызывается `StageManager.MaterializeColonyAsync(colony)`
+При загрузке playfield (`Event_Playfield_Loaded`) вызывается `ColonyManager.EnsurePlayfieldColoniesSpawnedAsync`:
 
-2. **Поиск подходящей позиции**: Используется `PlacementResolver.FindSuitableLocationAsync` для нахождения безопасной позиции:
+1. **Проверка виртуальности**: Если `colony.IsVirtual == true`
+2. **Пометка для отложенного спавна**: 
+   - `colony.PendingMaterialization = true`
+   - `colony.MaterializationAttempts = 0`
+3. **Без немедленного спавна** - playfield еще не готов!
+
+#### Этап 2: Retry-логика материализации (каждый тик)
+
+В каждом тике симуляции `ColonyTickModule` вызывает `TryMaterializePendingColoniesAsync`:
+
+1. **Поиск колоний с `PendingMaterialization == true`**
+
+2. **Попытка материализации** (до 10 раз):
+   - Счетчик `MaterializationAttempts++`
+   - Вызов `StageManager.MaterializeColonyAsync(colony)`
+
+3. **При успехе**:
+   - `colony.IsVirtual = false`
+   - `colony.PendingMaterialization = false`
+   - `colony.MaterializationAttempts = 0`
+
+4. **При ошибке** (PlayfieldConnectionNotFound):
+   - Логирование попытки
+   - Повтор в следующем тике (до 10 попыток)
+   - После 10 неудачных попыток - отказ
+
+**Процесс материализации (в StageManager):**
+
+1. **Поиск подходящей позиции**: Используется `PlacementResolver.FindSuitableLocationAsync` для нахождения безопасной позиции:
    - Минимальное расстояние от игроков: `MinDistanceFromPlayers` (по умолчанию 500м)
    - Минимальное расстояние от структур игроков: `MinDistanceFromPlayerStructures` (по умолчанию 1000м)
    - Радиус поиска: `SearchRadius` (по умолчанию 2000м)
@@ -98,10 +126,20 @@ Colony {Id}: Transitioning from LandingPending to Base1 [VIRTUAL]
 
 **Логи:**
 ```
+# Пометка для материализации
 EnsurePlayfieldColoniesSpawned: playfield 'Temperate Planet', 1 colony(ies)
+Virtual colony {Id} marked for materialization (will retry in next ticks)
+
+# Retry-попытки (каждый тик)
+TryMaterializePendingColonies: 1 colony(ies) pending materialization
+Attempting to materialize colony {Id} (attempt 1/10)
+Materialization attempt 1 failed for colony {Id}: PlayfieldConnectionNotFound
+
+Attempting to materialize colony {Id} (attempt 2/10)
 Materializing virtual colony {Id} on 'Temperate Planet'...
 Found suitable location for colony {Id} at (1234.5, 100.0, -567.8)
 Colony {Id} materialized successfully with structure {structureId} at (1234.5, 100.0, -567.8)
+✅ Colony {Id} materialized successfully on attempt 2
 ```
 
 ---
@@ -198,11 +236,23 @@ public class Colony
 {
     /// <summary>
     /// Флаг виртуализации: колония существует в БД без физического спавна структур.
-    /// Виртуальная колония развивается, производит ресурсы и юниты, но структуры не спавнятся.
-    /// При загрузке плейфилда виртуальная колония материализуется (IsVirtual = false) и спавнятся структуры.
     /// </summary>
     [JsonProperty("IsVirtual")]
     public bool IsVirtual { get; set; }
+
+    /// <summary>
+    /// Флаг ожидания материализации: колония помечена для материализации, но playfield еще не готов.
+    /// Используется для retry-логики при ошибке PlayfieldConnectionNotFound.
+    /// </summary>
+    [JsonProperty("PendingMaterialization")]
+    public bool PendingMaterialization { get; set; }
+
+    /// <summary>
+    /// Количество попыток материализации (для retry-логики).
+    /// Сбрасывается в 0 после успешной материализации.
+    /// </summary>
+    [JsonProperty("MaterializationAttempts")]
+    public int MaterializationAttempts { get; set; }
 
     public Colony(string playfield, int factionId, Vector3 position, bool isVirtual = false)
     {
@@ -212,7 +262,7 @@ public class Colony
         Stage = ColonyStage.LandingPending;
         CreatedAt = DateTime.UtcNow;
         ThreatLevel = 1;
-        IsVirtual = isVirtual; // ← Новый параметр
+        IsVirtual = isVirtual;
     }
 }
 ```
@@ -231,6 +281,8 @@ public class Colony
       "Position": { "X": 0, "Y": 0, "Z": 0 },
       "MainStructureId": null,
       "IsVirtual": true,  // ← Виртуальная колония
+      "PendingMaterialization": true,  // ← Ожидает материализации
+      "MaterializationAttempts": 2,  // ← Попытка #2
       "Resources": {
         "Amount": 1500.5,
         "ProductionRate": 10.0
@@ -254,16 +306,18 @@ public class Colony
 /// <summary>
 /// Создает новую колонию (может быть виртуальной)
 /// </summary>
-/// <param name="playfield">Название playfield</param>
-/// <param name="position">Позиция (может быть нулевой для виртуальных)</param>
-/// <param name="factionId">ID фракции</param>
-/// <param name="isVirtual">Создать виртуальную колонию (без спавна структур)</param>
 Task<Colony> CreateColonyAsync(string playfield, Vector3 position, int factionId, bool isVirtual = false);
 
 /// <summary>
-/// При загрузке playfield: материализация виртуальных колоний и обновление/защита структур.
+/// При загрузке playfield: помечает виртуальные колонии для материализации (отложенный спавн).
 /// </summary>
 Task EnsurePlayfieldColoniesSpawnedAsync(string playfield);
+
+/// <summary>
+/// Пытается материализовать колонии с PendingMaterialization=true (retry-логика).
+/// Вызывается каждый тик. Повторяет попытки до 10 раз при ошибке PlayfieldConnectionNotFound.
+/// </summary>
+Task TryMaterializePendingColoniesAsync();
 ```
 
 ### IStageManager
@@ -419,12 +473,23 @@ DEBUG | ColonyManager: updating colony abc123 (Temperate Planet, stage=Base1, dt
 INFO  | Colony abc123: Transitioning from LandingPending to Base1 [VIRTUAL]
 ```
 
-### Материализация
+### Материализация (с retry-логикой)
 ```
+# Пометка при загрузке playfield
+INFO  | ColonyTickModule: Playfield_Loaded 'Temperate Planet' — ensuring colonies on playfield
 INFO  | EnsurePlayfieldColoniesSpawned: playfield 'Temperate Planet', 1 colony(ies)
+INFO  | Virtual colony abc123 marked for materialization (will retry in next ticks)
+
+# Retry-попытки (каждый тик)
+DEBUG | TryMaterializePendingColonies: 1 colony(ies) pending materialization
+DEBUG | Attempting to materialize colony abc123 (attempt 1/10)
+DEBUG | Materialization attempt 1 failed for colony abc123: PlayfieldConnectionNotFound
+
+DEBUG | Attempting to materialize colony abc123 (attempt 2/10)
 INFO  | Materializing virtual colony abc123 on 'Temperate Planet'...
 INFO  | Found suitable location for colony abc123 at (1234.5, 100.0, -567.8)
 INFO  | Colony abc123 materialized successfully with structure 42 at (1234.5, 100.0, -567.8)
+INFO  | ✅ Colony abc123 materialized successfully on attempt 2
 ```
 
 ---
@@ -439,12 +504,45 @@ INFO  | Colony abc123 materialized successfully with structure 42 at (1234.5, 10
 
 ---
 
+## Retry-логика материализации
+
+### Зачем нужна retry-логика?
+
+Проблема `PlayfieldConnectionNotFound` возникает, когда playfield загружен (`Event_Playfield_Loaded`), но еще **не полностью готов** к операциям спавна структур через ModAPI.
+
+### Как работает retry-логика?
+
+1. **При Event_Playfield_Loaded:**
+   - Колония НЕ материализуется немедленно
+   - Только помечается: `PendingMaterialization = true`
+
+2. **Каждый тик симуляции (1 раз в секунду):**
+   - `TryMaterializePendingColoniesAsync` проверяет помеченные колонии
+   - Пытается материализовать каждую (до 10 попыток)
+   - При успехе — сбрасывает флаги и счетчик
+
+3. **При неудаче:**
+   - `MaterializationAttempts++`
+   - Логируется попытка (DEBUG уровень)
+   - Повтор в следующем тике
+
+4. **После 10 неудачных попыток:**
+   - `PendingMaterialization = false` — отказ от материализации
+   - Логируется предупреждение (WARN уровень)
+   - Колония остается виртуальной
+
+### Параметры retry
+- **Максимум попыток:** 10
+- **Интервал между попытками:** 1 секунда (частота тика симуляции)
+- **Общее время ожидания:** до 10 секунд
+
 ## Известные ограничения
 
 1. **Виртуальные колонии не отображаются на карте** до материализации
 2. **Игрок не может атаковать виртуальные колонии** (структур нет в мире)
 3. **Виртуальные охранники не патрулируют** (спавнятся только при материализации)
 4. **Позиция виртуальной колонии `(0, 0, 0)`** не имеет смысла до материализации
+5. **Материализация может занять до 10 секунд** при проблемах с playfield
 
 ---
 

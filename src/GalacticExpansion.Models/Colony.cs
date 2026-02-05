@@ -129,6 +129,20 @@ namespace GalacticExpansion.Models
         public bool IsVirtual { get; set; }
 
         /// <summary>
+        /// Флаг ожидания материализации: колония помечена для материализации, но playfield еще не готов.
+        /// Используется для retry-логики при ошибке PlayfieldConnectionNotFound.
+        /// </summary>
+        [JsonProperty("PendingMaterialization")]
+        public bool PendingMaterialization { get; set; }
+
+        /// <summary>
+        /// Количество попыток материализации (для retry-логики).
+        /// Сбрасывается в 0 после успешной материализации.
+        /// </summary>
+        [JsonProperty("MaterializationAttempts")]
+        public int MaterializationAttempts { get; set; }
+
+        /// <summary>
         /// Конструктор по умолчанию
         /// </summary>
         public Colony()
