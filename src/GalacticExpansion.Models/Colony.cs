@@ -121,18 +121,31 @@ namespace GalacticExpansion.Models
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
+        /// Флаг виртуализации: колония существует в БД без физического спавна структур.
+        /// Виртуальная колония развивается, производит ресурсы и юниты, но структуры не спавнятся.
+        /// При загрузке плейфилда виртуальная колония материализуется (IsVirtual = false) и спавнятся структуры.
+        /// </summary>
+        [JsonProperty("IsVirtual")]
+        public bool IsVirtual { get; set; }
+
+        /// <summary>
         /// Конструктор по умолчанию
         /// </summary>
         public Colony()
         {
             CreatedAt = DateTime.UtcNow;
             ThreatLevel = 1;
+            IsVirtual = false;
         }
 
         /// <summary>
         /// Конструктор с параметрами
         /// </summary>
-        public Colony(string playfield, int factionId, Vector3 position)
+        /// <param name="playfield">Название playfield</param>
+        /// <param name="factionId">ID фракции</param>
+        /// <param name="position">Позиция колонии (может быть нулевой для виртуальных)</param>
+        /// <param name="isVirtual">Флаг виртуализации</param>
+        public Colony(string playfield, int factionId, Vector3 position, bool isVirtual = false)
         {
             Playfield = playfield;
             FactionId = factionId;
@@ -140,6 +153,7 @@ namespace GalacticExpansion.Models
             Stage = ColonyStage.LandingPending;
             CreatedAt = DateTime.UtcNow;
             ThreatLevel = 1;
+            IsVirtual = isVirtual;
         }
 
         /// <summary>

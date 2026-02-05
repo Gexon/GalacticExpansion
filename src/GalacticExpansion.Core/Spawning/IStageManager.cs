@@ -31,8 +31,20 @@ namespace GalacticExpansion.Core.Spawning
         Task MaintainColonyStructuresAsync(Colony colony);
 
         /// <summary>
-        /// Инициализирует новую колонию с DropShip
+        /// Инициализирует новую колонию: создаёт объект Colony, опционально спавнит DropShip.
         /// </summary>
-        Task<Colony> InitializeColonyAsync(string playfield, Vector3 position, int factionId);
+        /// <param name="playfield">Название playfield.</param>
+        /// <param name="position">Позиция колонии (может быть нулевой для виртуальных).</param>
+        /// <param name="factionId">Идентификатор фракции.</param>
+        /// <param name="isVirtual">Создать виртуальную колонию (без спавна структур).</param>
+        /// <returns>Созданная колония в стадии LandingPending.</returns>
+        Task<Colony> InitializeColonyAsync(string playfield, Vector3 position, int factionId, bool isVirtual = false);
+
+        /// <summary>
+        /// Материализует виртуальную колонию: находит подходящую позицию и спавнит структуры.
+        /// Обновляет IsVirtual = false, Position, MainStructureId.
+        /// </summary>
+        /// <param name="colony">Виртуальная колония для материализации.</param>
+        Task MaterializeColonyAsync(Colony colony);
     }
 }

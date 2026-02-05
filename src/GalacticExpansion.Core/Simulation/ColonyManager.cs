@@ -44,31 +44,33 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Обновляет колонию: экономику, производство юнитов, проверку апгрейдов, защиту структур
+        /// Обновляет колонию: экономику, производство юнитов, проверку апгрейдов, защиту структур.
+        /// Виртуальные колонии также обновляются, но без физических операций со структурами.
         /// </summary>
         public async Task UpdateColonyAsync(Colony colony, float deltaTime)
         {
             if (colony == null)
                 throw new ArgumentNullException(nameof(colony));
 
-            _logger.Debug($"ColonyManager: updating colony {colony.Id} ({colony.Playfield}, stage={colony.Stage}, dt={deltaTime:F2}s)");
+            var virtualFlag = colony.IsVirtual ? " [VIRTUAL]" : "";
+            _logger.Debug($"ColonyManager: updating colony {colony.Id} ({colony.Playfield}, stage={colony.Stage}, dt={deltaTime:F2}s){virtualFlag}");
 
             try
             {
-                // 1. Обновление производства ресурсов
+                // 1. Обновление производства ресурсов (работает для виртуальных)
                 _economySimulator.UpdateProduction(colony, deltaTime);
 
-                // 2. Обновление производства юнитов
+                // 2. Обновление производства юнитов (работает для виртуальных)
                 _unitEconomy.ProduceUnits(colony, deltaTime);
 
-                // 3. Проверка возможности апгрейда
+                // 3. Проверка возможности апгрейда (работает для виртуальных)
                 if (await _stageManager.CanTransitionToNextStageAsync(colony))
                 {
                     await _stageManager.TransitionToNextStageAsync(colony);
                 }
 
-                // 4. Защита структур от decay (каждый час)
-                if (ShouldMaintainStructures(colony))
+                // 4. Защита структур от decay (ТОЛЬКО для материализованных колоний)
+                if (!colony.IsVirtual && ShouldMaintainStructures(colony))
                 {
                     await _stageManager.MaintainColonyStructuresAsync(colony);
                 }
@@ -80,13 +82,18 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Создает новую колонию
+        /// Создает новую колонию (может быть виртуальной)
         /// </summary>
-        public async Task<Colony> CreateColonyAsync(string playfield, Vector3 position, int factionId)
+        /// <param name="playfield">Название playfield</param>
+        /// <param name="position">Позиция (может быть нулевой для виртуальных)</param>
+        /// <param name="factionId">ID фракции</param>
+        /// <param name="isVirtual">Создать виртуальную колонию (без спавна структур)</param>
+        public async Task<Colony> CreateColonyAsync(string playfield, Vector3 position, int factionId, bool isVirtual = false)
         {
-            _logger.Info($"Creating new colony on '{playfield}' at {position}");
+            var virtualFlag = isVirtual ? " [VIRTUAL]" : "";
+            _logger.Info($"Creating new colony on '{playfield}' at {position}{virtualFlag}");
 
-            var colony = await _stageManager.InitializeColonyAsync(playfield, position, factionId);
+            var colony = await _stageManager.InitializeColonyAsync(playfield, position, factionId, isVirtual);
 
             // Добавление в state
             var state = await _stateStore.LoadAsync();
@@ -101,7 +108,7 @@ namespace GalacticExpansion.Core.Simulation
         /// </summary>
         /// <summary>
         /// При загрузке playfield вызывается из ColonyTickModule по Event_Playfield_Loaded.
-        /// Обновляет/защищает структуры колоний на этом playfield (Touch от decay); в будущем здесь же — спавн недостающих структур и юнитов.
+        /// Материализует виртуальные колонии (спавнит структуры) и обновляет/защищает структуры существующих колоний.
         /// </summary>
         public async Task EnsurePlayfieldColoniesSpawnedAsync(string playfield)
         {
@@ -109,22 +116,40 @@ namespace GalacticExpansion.Core.Simulation
                 return;
 
             var state = await _stateStore.LoadAsync();
-            var coloniesOnPlayfield = state.Colonies.Where(c => string.Equals(c.Playfield, playfield, StringComparison.OrdinalIgnoreCase)).ToList();
+            var coloniesOnPlayfield = state.Colonies
+                .Where(c => string.Equals(c.Playfield, playfield, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            
             if (coloniesOnPlayfield.Count == 0)
                 return;
 
-            _logger.Debug($"EnsurePlayfieldColoniesSpawned: playfield '{playfield}', {coloniesOnPlayfield.Count} colony(ies)");
+            _logger.Info($"EnsurePlayfieldColoniesSpawned: playfield '{playfield}', {coloniesOnPlayfield.Count} colony(ies)");
+            
             foreach (var colony in coloniesOnPlayfield)
             {
                 try
                 {
-                    await _stageManager.MaintainColonyStructuresAsync(colony);
+                    // Если колония виртуальная - материализуем её
+                    if (colony.IsVirtual)
+                    {
+                        _logger.Info($"Materializing virtual colony {colony.Id} on '{playfield}'...");
+                        await _stageManager.MaterializeColonyAsync(colony);
+                        _logger.Info($"Colony {colony.Id} materialized successfully");
+                    }
+                    else
+                    {
+                        // Если уже материализована - просто защищаем структуры
+                        await _stageManager.MaintainColonyStructuresAsync(colony);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error(ex, $"EnsurePlayfieldColoniesSpawned: error maintaining colony {colony.Id} on {playfield}");
+                    _logger.Error(ex, $"EnsurePlayfieldColoniesSpawned: error processing colony {colony.Id} on {playfield}");
                 }
             }
+            
+            // Сохраняем изменения (IsVirtual флаги обновлены)
+            await _stateStore.SaveAsync(state);
         }
 
         /// <summary>

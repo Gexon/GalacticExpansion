@@ -755,8 +755,9 @@ private async Task NotifyExpansionAsync(Colony source, Colony target)
 - **[Module_04_Entity_Spawner.md](Module_04_Entity_Spawner.md)** — спавн/удаление структур
 - **[Module_11_Economy_Simulator.md](Module_11_Economy_Simulator.md)** — проверка ресурсов
 - **[Module_12_Hostility_Tracker.md](Module_12_Hostility_Tracker.md)** — Most Wanted система для экспансии
+- **[../11_Colony_Virtualization.md](../11_Colony_Virtualization.md)** — система виртуализации колоний
 
 ---
 
-**Последнее обновление:** 29.01.2026  
+**Последнее обновление:** 05.02.2026  
 **Размер:** ~650 строк

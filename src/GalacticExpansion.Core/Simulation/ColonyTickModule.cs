@@ -12,8 +12,8 @@ namespace GalacticExpansion.Core.Simulation
 {
     /// <summary>
     /// Модуль симуляции: обновление колоний по тику и реакция на загрузку playfield.
-    /// Первую колонию создаёт по Event_Playfield_Loaded для HomePlayfield (без спама спавна в незагруженный playfield).
-    /// При загрузке playfield вызывается EnsurePlayfieldColoniesSpawnedAsync — обновление/защита структур и в будущем спавн юнитов.
+    /// Создаёт виртуальную колонию при инициализации (если state пуст).
+    /// При загрузке playfield вызывается EnsurePlayfieldColoniesSpawnedAsync — материализация виртуальных колоний и обновление/защита структур.
     /// </summary>
     public class ColonyTickModule : ISimulationModule
     {
@@ -23,9 +23,6 @@ namespace GalacticExpansion.Core.Simulation
         private readonly IEventBus _eventBus;
         private readonly Configuration _config;
         private readonly ILogger _logger;
-
-        /// <summary>Флаг: первая колония ещё не создана, ждём Event_Playfield_Loaded для HomePlayfield.</summary>
-        private bool _initialColonyPending;
 
         /// <inheritdoc/>
         public string ModuleName => "ColonyTickModule";
@@ -59,31 +56,25 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <inheritdoc/>
-        public Task InitializeAsync(SimulationState state)
+        public async Task InitializeAsync(SimulationState state)
         {
             _logger.Info("ColonyTickModule initializing...");
 
-            // Первую колонию больше не создаём по Event_Playfield_Loaded: спавн переносится на событие входа игрока на HomePlayfield.
-            // Здесь лишь помечаем, что колония ожидается, если state пуст и экспансия включена.
+            // Создаём виртуальную колонию при инициализации, если state пуст и экспансия включена
             if (state.Colonies.Count == 0 && _config.EnableExpansion)
             {
-                _initialColonyPending = true;
-                _logger.Info("ColonyTickModule: initial colony will be created when a player enters HomePlayfield (PlayerEnteredPlayfieldEvent)");
+                _logger.Info("ColonyTickModule: creating initial virtual colony...");
+                await CreateInitialVirtualColonyAsync();
             }
             else if (state.Colonies.Count > 0)
             {
-                _logger.Info($"ColonyTickModule: {state.Colonies.Count} colony(ies) already in state, skipping initial colony creation");
+                _logger.Info($"ColonyTickModule: {state.Colonies.Count} colony(ies) already in state");
             }
 
             // Подписка на низкоуровневые игровые события (в т.ч. Event_Playfield_Loaded) через шлюз.
             _gateway.GameEventReceived += OnGameEvent;
 
-            // Подписка на доменное событие входа игрока на playfield.
-            // Именно это событие теперь запускает создание первой колонии на HomePlayfield.
-            _eventBus.Subscribe<PlayerEnteredPlayfieldEvent>(OnPlayerEnteredPlayfield);
-
             _logger.Info("ColonyTickModule initialized");
-            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -110,72 +101,27 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Создаёт первую колонию на HomePlayfield.
-        /// Вызывается асинхронно по доменному событию входа игрока на нужный playfield
-        /// (PlayerEnteredPlayfieldEvent), после чего фактический спавн структуры идёт через StageManager/EntitySpawner.
+        /// Создаёт первую виртуальную колонию на HomePlayfield.
+        /// Виртуальная колония не имеет физических структур, но развивается в БД.
+        /// Материализация (спавн структур) произойдёт при загрузке playfield.
         /// </summary>
-        private async Task CreateInitialColonyWhenPlayfieldLoadedAsync(string playfield)
+        private async Task CreateInitialVirtualColonyAsync()
         {
+            var homePlayfield = _config.HomePlayfield ?? "Temperate Planet";
             var factionId = _config.Zirax?.FactionId ?? 2;
-            Vector3 position;
-            try
-            {
-                var criteria = new PlacementCriteria
-                {
-                    Playfield = playfield,
-                    MinDistanceFromPlayers = _config.Placement?.MinDistanceFromPlayers ?? 500f,
-                    MinDistanceFromPlayerStructures = _config.Placement?.MinDistanceFromPlayerStructures ?? 1000f,
-                    SearchRadius = _config.Placement?.SearchRadius ?? 2000f,
-                    FactionId = factionId
-                };
-                position = await _placementResolver.FindSuitableLocationAsync(criteria);
-                _logger.Info($"ColonyTickModule: found suitable location for initial colony at {position}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(ex, "ColonyTickModule: FindSuitableLocationAsync failed, using fallback position (0, 100, 0)");
-                position = new Vector3(0, 100, 0);
-            }
+            
+            // Создаём виртуальную колонию с нулевой позицией (позиция будет определена при материализации)
+            var virtualPosition = new Vector3(0, 0, 0);
 
             try
             {
-                var colony = await _colonyManager.CreateColonyAsync(playfield, position, factionId);
-                _logger.Info($"ColonyTickModule: created initial colony {colony.Id} on {playfield} at {position}");
+                var colony = await _colonyManager.CreateColonyAsync(homePlayfield, virtualPosition, factionId, isVirtual: true);
+                _logger.Info($"ColonyTickModule: created initial VIRTUAL colony {colony.Id} on '{homePlayfield}'. Will be materialized when playfield loads.");
             }
             catch (Exception ex)
             {
-                _logger.Error(ex, $"ColonyTickModule: failed to create initial colony on {playfield}");
-                _initialColonyPending = true; // Повторить при следующем входе игрока на HomePlayfield
+                _logger.Error(ex, $"ColonyTickModule: failed to create initial virtual colony on '{homePlayfield}'");
             }
-        }
-
-        /// <summary>
-        /// Обработчик доменного события входа игрока на playfield.
-        /// Спавн первой колонии переносится на это событие, чтобы гарантировать, что playfield полностью готов к операциям ModAPI.
-        /// </summary>
-        private void OnPlayerEnteredPlayfield(PlayerEnteredPlayfieldEvent evt)
-        {
-            if (evt == null)
-                return;
-
-            var homePlayfield = _config.HomePlayfield ?? "Akua";
-
-            // Игнорируем, если экспансия выключена или первая колония уже создана/в процессе создания.
-            if (!_config.EnableExpansion || !_initialColonyPending)
-                return;
-
-            // Нас интересует только вход на HomePlayfield.
-            if (!string.Equals(evt.Playfield, homePlayfield, StringComparison.OrdinalIgnoreCase))
-                return;
-
-            _logger.Info(
-                $"ColonyTickModule: player '{evt.PlayerName}' (Id={evt.PlayerId}) entered HomePlayfield '{evt.Playfield}' — scheduling initial colony creation");
-
-            // Сбрасываем флаг ожидания, чтобы избежать параллельных запусков.
-            _initialColonyPending = false;
-
-            // Запускаем асинхронное создание первой колонии.
-            _ = Task.Run(() => CreateInitialColonyWhenPlayfieldLoadedAsync(evt.Playfield));
         }
 
         /// <summary>
@@ -254,7 +200,6 @@ namespace GalacticExpansion.Core.Simulation
         public Task ShutdownAsync()
         {
             _gateway.GameEventReceived -= OnGameEvent;
-            _eventBus.Unsubscribe<PlayerEnteredPlayfieldEvent>(OnPlayerEnteredPlayfield);
             _logger.Info("ColonyTickModule shutting down");
             return Task.CompletedTask;
         }

@@ -64,6 +64,7 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Проверяет, можно ли перейти на следующую стадию (ресурсы, время, существование главной структуры).
+        /// Виртуальные колонии могут переходить на следующую стадию без проверки структур.
         /// </summary>
         /// <param name="colony">Колония.</param>
         /// <returns>True, если переход возможен.</returns>
@@ -76,8 +77,8 @@ namespace GalacticExpansion.Core.Spawning
             if (colony.Stage >= ColonyStage.BaseMax)
                 return false;
 
-            // Проверка существования главной структуры
-            if (colony.MainStructureId.HasValue)
+            // Проверка существования главной структуры (ТОЛЬКО для материализованных колоний)
+            if (!colony.IsVirtual && colony.MainStructureId.HasValue)
             {
                 var exists = await _entitySpawner.EntityExistsAsync(colony.MainStructureId.Value);
                 if (!exists)
@@ -129,42 +130,51 @@ namespace GalacticExpansion.Core.Spawning
                 return;
             }
 
-            _logger.Info($"Colony {colony.Id}: Transitioning from {colony.Stage} to {nextStage}");
+            var virtualFlag = colony.IsVirtual ? " [VIRTUAL]" : "";
+            _logger.Info($"Colony {colony.Id}: Transitioning from {colony.Stage} to {nextStage}{virtualFlag}");
 
             try
             {
-                // 1. Удаление старой структуры
-                if (colony.MainStructureId.HasValue)
+                // Физические операции ТОЛЬКО для материализованных колоний
+                if (!colony.IsVirtual)
                 {
-                    await _entitySpawner.DestroyEntityAsync(colony.MainStructureId.Value);
+                    // 1. Удаление старой структуры
+                    if (colony.MainStructureId.HasValue)
+                    {
+                        await _entitySpawner.DestroyEntityAsync(colony.MainStructureId.Value);
+                    }
+
+                    // 2. Спавн новой структуры
+                    var newStructureId = await _entitySpawner.SpawnStructureAtTerrainAsync(
+                        colony.Playfield,
+                        nextStageConfig.PrefabName,
+                        colony.Position.X,
+                        colony.Position.Z,
+                        colony.FactionId,
+                        heightOffset: 0.5f
+                    );
+
+                    colony.MainStructureId = newStructureId;
+                    
+                    // 8. Защита от decay
+                    await TouchStructure(newStructureId);
                 }
 
-                // 2. Спавн новой структуры
-                var newStructureId = await _entitySpawner.SpawnStructureAtTerrainAsync(
-                    colony.Playfield,
-                    nextStageConfig.PrefabName,
-                    colony.Position.X,
-                    colony.Position.Z,
-                    colony.FactionId,
-                    heightOffset: 0.5f
-                );
-
-                // 3. Обновление состояния колонии
+                // 3. Обновление состояния колонии (работает для всех)
                 colony.Stage = nextStage;
-                colony.MainStructureId = newStructureId;
                 colony.LastUpgradeTime = DateTime.UtcNow;
 
-                // 4. Потребление ресурсов
+                // 4. Потребление ресурсов (работает для всех)
                 _economySimulator.ConsumeResourcesForUpgrade(colony, nextStageConfig.RequiredResources);
 
-                // 5. Обновление ProductionRate
+                // 5. Обновление ProductionRate (работает для всех)
                 colony.Resources.ProductionRate = nextStageConfig.ProductionRate;
 
-                // 6. Пересчет capacity юнитов
+                // 6. Пересчет capacity юнитов (работает для всех)
                 _unitEconomy.RecalculateCapacity(colony);
 
-                // 7. Спавн охранников
-                if (nextStageConfig.GuardCount > 0)
+                // 7. Спавн охранников (ТОЛЬКО для материализованных)
+                if (!colony.IsVirtual && nextStageConfig.GuardCount > 0)
                 {
                     if (_unitEconomy.ReserveUnits(colony, UnitType.Guard, nextStageConfig.GuardCount))
                     {
@@ -182,9 +192,6 @@ namespace GalacticExpansion.Core.Spawning
                         }
                     }
                 }
-
-                // 8. Защита от decay
-                await TouchStructure(newStructureId);
 
                 // 9. Сохранение state
                 // КРИТИЧНО: Загружаем актуальный state и синхронизируем ВСЕ изменения
@@ -300,36 +307,115 @@ namespace GalacticExpansion.Core.Spawning
         }
 
         /// <summary>
-        /// Инициализирует новую колонию: создаёт объект Colony, спавнит DropShip, сохраняет MainStructureId и CreatedAt.
+        /// Инициализирует новую колонию: создаёт объект Colony, опционально спавнит DropShip.
         /// </summary>
         /// <param name="playfield">Название playfield.</param>
-        /// <param name="position">Позиция колонии.</param>
+        /// <param name="position">Позиция колонии (может быть нулевой для виртуальных).</param>
         /// <param name="factionId">Идентификатор фракции.</param>
+        /// <param name="isVirtual">Создать виртуальную колонию (без спавна структур).</param>
         /// <returns>Созданная колония в стадии LandingPending.</returns>
-        public async Task<Colony> InitializeColonyAsync(string playfield, Vector3 position, int factionId)
+        public async Task<Colony> InitializeColonyAsync(string playfield, Vector3 position, int factionId, bool isVirtual = false)
         {
-            _logger.Info($"Initializing new colony on '{playfield}' at {position}");
+            var virtualFlag = isVirtual ? " [VIRTUAL]" : "";
+            _logger.Info($"Initializing new colony on '{playfield}' at {position}{virtualFlag}");
 
-            var colony = new Colony(playfield, factionId, position)
+            var colony = new Colony(playfield, factionId, position, isVirtual)
             {
-                Stage = ColonyStage.LandingPending
+                Stage = ColonyStage.LandingPending,
+                CreatedAt = DateTime.UtcNow
             };
 
-            // Спавн «посадочной» структуры (префаб из конфига или стандартный BA_ConstructionSite)
-            var dropPrefab = _config.Zirax?.DropShips?.FirstOrDefault()?.PrefabName ?? "BA_ConstructionSite";
-            var dropShipId = await _entitySpawner.SpawnStructureAtTerrainAsync(
-                playfield,
-                dropPrefab,
-                position.X,
-                position.Z,
-                factionId,
-                heightOffset: 10f // Выше для посадки
-            );
+            // Спавн структуры ТОЛЬКО для материализованных колоний
+            if (!isVirtual)
+            {
+                // Спавн «посадочной» структуры (префаб из конфига или стандартный BA_ConstructionSite)
+                var dropPrefab = _config.Zirax?.DropShips?.FirstOrDefault()?.PrefabName ?? "BA_ConstructionSite";
+                var dropShipId = await _entitySpawner.SpawnStructureAtTerrainAsync(
+                    playfield,
+                    dropPrefab,
+                    position.X,
+                    position.Z,
+                    factionId,
+                    heightOffset: 10f // Выше для посадки
+                );
 
-            colony.MainStructureId = dropShipId;
-            colony.CreatedAt = DateTime.UtcNow;
+                colony.MainStructureId = dropShipId;
+                _logger.Info($"Colony {colony.Id} initialized with structure {dropShipId}");
+            }
+            else
+            {
+                _logger.Info($"Virtual colony {colony.Id} initialized without structures");
+            }
 
             return colony;
+        }
+
+        /// <summary>
+        /// Материализует виртуальную колонию: находит подходящую позицию и спавнит структуры.
+        /// Обновляет IsVirtual = false, Position, MainStructureId.
+        /// </summary>
+        /// <param name="colony">Виртуальная колония для материализации.</param>
+        public async Task MaterializeColonyAsync(Colony colony)
+        {
+            if (colony == null)
+                throw new ArgumentNullException(nameof(colony));
+
+            if (!colony.IsVirtual)
+            {
+                _logger.Warn($"Colony {colony.Id} is already materialized");
+                return;
+            }
+
+            _logger.Info($"Materializing virtual colony {colony.Id} on '{colony.Playfield}'...");
+
+            // Находим подходящую позицию для материализации
+            Vector3 position;
+            try
+            {
+                var criteria = new PlacementCriteria
+                {
+                    Playfield = colony.Playfield,
+                    MinDistanceFromPlayers = _config.Placement?.MinDistanceFromPlayers ?? 500f,
+                    MinDistanceFromPlayerStructures = _config.Placement?.MinDistanceFromPlayerStructures ?? 1000f,
+                    SearchRadius = _config.Placement?.SearchRadius ?? 2000f,
+                    FactionId = colony.FactionId
+                };
+                position = await _placementResolver.FindSuitableLocationAsync(criteria);
+                _logger.Info($"Found suitable location for colony {colony.Id} at {position}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"FindSuitableLocationAsync failed for colony {colony.Id}, using fallback position (0, 100, 0)");
+                position = new Vector3(0, 100, 0);
+            }
+
+            // Обновляем позицию колонии
+            colony.Position = position;
+
+            // Спавним структуру в зависимости от текущей стадии
+            var dropPrefab = _config.Zirax?.DropShips?.FirstOrDefault()?.PrefabName ?? "BA_ConstructionSite";
+            
+            try
+            {
+                var structureId = await _entitySpawner.SpawnStructureAtTerrainAsync(
+                    colony.Playfield,
+                    dropPrefab,
+                    position.X,
+                    position.Z,
+                    colony.FactionId,
+                    heightOffset: 10f
+                );
+
+                colony.MainStructureId = structureId;
+                colony.IsVirtual = false; // Колония теперь материализована
+
+                _logger.Info($"Colony {colony.Id} materialized successfully with structure {structureId} at {position}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, $"Failed to materialize colony {colony.Id}");
+                throw;
+            }
         }
 
         /// <summary>

@@ -171,7 +171,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
                 Stage = ColonyStage.LandingPending
             };
 
-            _stageManagerMock.Setup(s => s.InitializeColonyAsync(playfield, position, factionId))
+            _stageManagerMock.Setup(s => s.InitializeColonyAsync(playfield, position, factionId, It.IsAny<bool>()))
                 .ReturnsAsync(expectedColony);
 
             // Act
@@ -181,7 +181,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             Assert.NotNull(colony);
             Assert.Equal("new-colony", colony.Id);
             Assert.Equal(playfield, colony.Playfield);
-            _stageManagerMock.Verify(s => s.InitializeColonyAsync(playfield, position, factionId), Times.Once);
+            _stageManagerMock.Verify(s => s.InitializeColonyAsync(playfield, position, factionId, It.IsAny<bool>()), Times.Once);
         }
 
         [Fact(DisplayName = "CreateColony - добавляет колонию в state и сохраняет")]
@@ -195,7 +195,7 @@ namespace GalacticExpansion.Tests.Unit.Simulation
 
             var state = new SimulationState { Colonies = new List<Colony>() };
             _stateStoreMock.Setup(s => s.LoadAsync()).ReturnsAsync(state);
-            _stageManagerMock.Setup(s => s.InitializeColonyAsync(It.IsAny<string>(), It.IsAny<Vector3>(), It.IsAny<int>()))
+            _stageManagerMock.Setup(s => s.InitializeColonyAsync(It.IsAny<string>(), It.IsAny<Vector3>(), It.IsAny<int>(), It.IsAny<bool>()))
                 .ReturnsAsync(newColony);
 
             // Act
