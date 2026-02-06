@@ -2,21 +2,26 @@
 
 ## Текущее состояние
 
-**Дата обновления:** 05.02.2026  
-**Фаза:** Phase 3 Domain — завершена с системой виртуализации колоний, runtime-логика стабильна
+**Дата обновления:** 06.02.2026  
+**Фаза:** Phase 3 Domain + Multi-Process IPC Architecture — РЕАЛИЗОВАНО ✅
 
 ## Главное за последние изменения
 
-### 🎯 Виртуализация колоний (Colony Virtualization) — РЕАЛИЗОВАНО ✅
+### 🚀 Multi-Process IPC Architecture — РЕВОЛЮЦИОННОЕ ИЗМЕНЕНИЕ ✅
 
-**Проблема:** 
-- Колонии не создавались из-за `PlayfieldConnectionNotFound` при спавне
-- Использовался неправильный API: `Event_Playfield_Loaded` срабатывал слишком рано
-- `Event_Player_ChangedPlayfield` не работает в single-player (баг Empyrion API)
+**Фундаментальная проблема:** 
+- Empyrion Dedicated Server использует **multi-process архитектуру**:
+  - `Dedi процесс` - главный сервер (чат, логика, НЕТ spawn операций)
+  - `PfServer процесс` - playfield сервер (entity spawn, НО НЕТ глобальной логики)
+- Мод загружается **ДВАЖДЫ**: в Dedi И в каждый PfServer
+- Spawn операции работают **ТОЛЬКО из PfServer процесса**
+- Старая архитектура пыталась спавнить из Dedi → `PlayfieldConnectionNotFound`
 
-**Решение:** 
-- Система виртуализации с материализацией из `Game_Update()` в PfServer процессе
-- Решает проблему многопроцессной архитектуры Empyrion (Dedi vs PfServer)
+**Решение - IPC через INetwork ModAPI:**
+- **Inter-Process Communication (IPC)** между Dedi и PfServer процессами
+- Request/Response протокол через JSON сериализацию
+- Автоматическая маршрутизация через `IPCEntitySpawner`
+- Жесткая проверка playfield перед spawn операциями
 
 - **Colony модель:**
   - `IsVirtual` (bool) — флаг виртуализации
@@ -30,24 +35,44 @@
   - Подписывается на `Event_Playfield_Loaded` через `IEmpyrionGateway`
   - **НЕ вызывает** `TryMaterializePendingColoniesAsync` (это теперь в Game_Update)
 
-- **ModMain.Game_Update():**
-  - КРИТИЧНО: материализация вызывается отсюда (правильный поток для spawn в PfServer)
-  - Каждый game tick вызывает `_colonyManager.TryMaterializePendingColoniesAsync()`
-  - Это гарантирует выполнение в контексте с playfield connection
+- **ModMain (Multi-Process):**
+  - `Init(IModApi)` определяет режим через `modApi.Application.Mode`
+  - `InitializeDedicatedServer()` - полная инициализация (Dedi):
+    - NetworkBridge создается **ПЕРВЫМ** (для IPC)
+    - IPCEntitySpawner создается **ДО** модулей (правильный граф зависимостей!)
+    - SimulationEngine, ColonyManager, все модули
+  - `InitializePlayfieldServer()` - легковесная (PfServer):
+    - Подписка на `OnPlayfieldLoaded` для гарантированной готовности
+    - NetworkBridge receiver для IPC команд от Dedi
+    - EntitySpawner для выполнения spawn
+  - `Game_Update()` - разная логика:
+    - Dedi: периодические бэкапы (материализация через IPC автоматическая!)
+    - PfServer: минимальная (IPC обрабатывается асинхронно)
 
-- **ColonyManager:**
-  - Имеет `IEmpyrionGateway` для проверки готовности плейфилдов
-  - `EnsurePlayfieldColoniesSpawnedAsync` — помечает виртуальные колонии: `PendingMaterialization = true`, `MaterializationAttempts = 0`
-  - `TryMaterializePendingColoniesAsync` — вызывается из Game_Update (до 100 попыток):
-    - `IsPlayfieldReadyAsync` — проверяет готовность через `Request_Playfield_Stats` (timeout 2с)
-    - Если плейфилд НЕ готов → повтор в следующем Game_Update (~1 секунда)
-    - Если плейфилд готов → попытка материализации
-    - При ошибке материализации → повтор в следующем Game_Update
-  - `UpdateColonyAsync` — виртуальные колонии развиваются БЕЗ физических операций со структурами
+- **NetworkBridge (IPC транспорт):**
+  - `InitializeForDedi()` - регистрирует receiver для Dedi процесса
+  - `InitializeForPlayfieldServer(playfieldName)` - регистрирует receiver для PfServer
+  - `SendRequestToPlayfieldAsync<T>()` - отправка с таймаутом (15s структуры, 10s NPC)
+  - Request/Response tracking через `ConcurrentDictionary<Guid, TaskCompletionSource>`
+  - JSON сериализация для простоты отладки
 
-- **EntitySpawner:**
-  - `SpawnStructureAsync` — ОБЯЗАТЕЛЬНО передаём `playfield` в `EntitySpawnInfo.playfield`
-  - Без этого поля spawn может пойти не на тот playfield или упасть
+- **IPCEntitySpawner (Маршрутизатор):**
+  - Wrapper вокруг EntitySpawner, реализует `IEntitySpawner`
+  - Dedi mode: `SpawnStructureAsync()` → `SpawnViaIPCAsync()` → NetworkBridge
+  - PfServer mode: `SpawnStructureAsync()` → `directSpawner.SpawnStructureAsync()`
+  - Поддержка структур (SpawnStructureRequest) И NPC (SpawnNPCRequest)
+  - Прозрачность: вся существующая логика работает без изменений!
+
+- **HandleIPCRequestAsync (PfServer):**
+  - Обработчик IPC запросов от Dedi
+  - **ЖЕСТКАЯ проверка playfield** перед spawn (если не совпадает → error)
+  - Поддерживает SpawnStructureRequest и SpawnNPCRequest
+  - Отправляет SpawnStructureResponse/SpawnNPCResponse обратно в Dedi
+
+- **EntitySpawner (исправления):**
+  - `factionId` теперь `int` (не `byte`) - правильный тип по EntitySpawnInfo
+  - `factionGroup` НЕ используется (только если `factionId = -1`)
+  - Для NPC: `entityTypeName` вместо `prefabName` и `type`
 
 - **StageManager:**
   - `InitializeColonyAsync` — поддержка параметра `isVirtual`, спавн только для материализованных
@@ -63,17 +88,19 @@
 - **Инструкция для тестера:** `docs/manuals/Tester_Manual_Colony_Access.md` — консольные команды (tt, gm, find), как найти колонию по state.json/логам.
 - **Тесты:** SimulationEngineTests ожидают минимум 2 вызова `LoadAsync` (загрузка + перезагрузка после init, дальнейшие вызовы при тиках допустимы); PlacementResolverTests — тип ответа `GlobalStructureList`; все unit/integration тесты проходят.
 
-**Преимущества виртуализации:**
-1. ✅ Независимость от событий игрока — колония создается сразу при старте
-2. ✅ **Правильный процесс** — материализация из Game_Update() в PfServer процессе (есть playfield connection)
-3. ✅ **Request_Playfield_Stats** — надёжная проверка готовности (до 100 попыток)
-4. ✅ **EntitySpawnInfo.playfield** — правильное указание целевого playfield
-5. ✅ **Работает везде** — local dedicated и dedicated server
-6. ✅ Экономика и развитие работают непрерывно (виртуально)
-7. ✅ Производительность — нет лишних структур до прихода игрока
-8. ✅ Масштабируемость — можно создавать множество виртуальных колоний
+**Преимущества IPC архитектуры:**
+1. ✅ **Решена PlayfieldConnectionNotFound** - spawn в правильном процессе
+2. ✅ **Правильный граф зависимостей** - IPCEntitySpawner создается ДО модулей
+3. ✅ **Гарантированная готовность** - OnPlayfieldLoaded + жесткая проверка playfield
+4. ✅ **NPC spawn через IPC** - работает так же как структуры
+5. ✅ **Прозрачность** - код использует `IEntitySpawner` не зная про IPC
+6. ✅ **Надежность** - таймауты, retry, обработка ошибок
+7. ✅ **Диагностика** - префиксы процессов в логах `[Dedi-PID]` / `[PfServer-PID]`
+8. ✅ **Масштабируемость** - работает с любым количеством PfServer процессов
 
-**Документация:** `docs/architecture/11_Colony_Virtualization.md`
+**Документация:** 
+- `docs/architecture/12_Multi_Process_IPC_Architecture.md` - полная документация IPC
+- `docs/architecture/11_Colony_Virtualization.md` - виртуализация колоний
 
 ### Прочие изменения Phase 3
 

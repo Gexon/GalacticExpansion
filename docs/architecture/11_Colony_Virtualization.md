@@ -670,8 +670,163 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 
 ---
 
+---
+
+## ОБНОВЛЕНИЕ 2026-02-06: Multi-Process IPC Architecture
+
+### Революционное изменение архитектуры
+
+Предыдущий подход с `Game_Update()` **частично работал**, но имел фундаментальную проблему: **материализация всё равно пыталась спавнить из Dedi процесса**.
+
+### Новая IPC архитектура (ТЕКУЩАЯ РЕАЛИЗАЦИЯ)
+
+**Ключевое понимание:**
+- Мод загружается **ДВАЖДЫ**: в Dedi процесс И в каждый PfServer процесс
+- Spawn операции **ОБЯЗАНЫ** выполняться в PfServer процессе
+- Решение: **Inter-Process Communication (IPC)** через `INetwork` ModAPI
+
+### Архитектура потока материализации (IPC)
+
+```
+═══════════════════════════════════════════════════════════════════
+                        DEDI ПРОЦЕСС
+═══════════════════════════════════════════════════════════════════
+1. ColonyTickModule обрабатывает Event_Playfield_Loaded
+2. ColonyManager.TryMaterializePendingColoniesAsync()
+3. StageManager.MaterializeColonyAsync()
+4. IPCEntitySpawner.SpawnStructureAsync() [Обнаруживает: Dedi mode]
+5. SpawnViaIPCAsync() → создает SpawnStructureRequest
+6. NetworkBridge.SendRequestToPlayfieldAsync()
+   - Сериализует в JSON → byte[]
+   - INetwork.SendToPlayfieldServer("GLEX", "Temperate Planet", data)
+   ↓
+   ═══════════════════ [IPC через INetwork] ═══════════════════════
+   ↓
+═══════════════════════════════════════════════════════════════════
+                      PFSERVER ПРОЦЕСС
+═══════════════════════════════════════════════════════════════════
+7. NetworkBridge.OnPlayfieldPacketReceived()
+8. ModMain.HandleIPCRequestAsync(SpawnStructureRequest)
+9. ЖЕСТКАЯ ПРОВЕРКА: playfield совпадает?
+10. IPCEntitySpawner.SpawnStructureAsync() [Обнаруживает: PfServer mode]
+11. directSpawner.SpawnStructureAsync() → Request_Entity_Spawn
+12. ✅ ENTITY SPAWNED в правильном процессе!
+13. SpawnStructureResponse → NetworkBridge → обратно в Dedi
+   ↓
+   ═══════════════════ [IPC через INetwork] ═══════════════════════
+   ↓
+═══════════════════════════════════════════════════════════════════
+                        DEDI ПРОЦЕСС (возврат)
+═══════════════════════════════════════════════════════════════════
+14. NetworkBridge получает response
+15. TaskCompletionSource.SetResult(response)
+16. SpawnViaIPCAsync() возвращает EntityId
+17. ✅ Колония материализована!
+```
+
+### Ключевые компоненты IPC
+
+**1. IPCProtocol (Протокол сообщений):**
+- `SpawnStructureRequest/Response` - для структур
+- `SpawnNPCRequest/Response` - для NPC
+- `PlayfieldReadyRequest/Response` - проверка готовности
+- JSON сериализация, RequestId для tracking
+
+**2. NetworkBridge (IPC транспорт):**
+- `InitializeForDedi()` - регистрация receiver для Dedi процесса
+- `InitializeForPlayfieldServer()` - регистрация receiver для PfServer процесса
+- `SendRequestToPlayfieldAsync()` - отправка запроса с таймаутом (15s)
+- Request/Response tracking через `ConcurrentDictionary<Guid, TaskCompletionSource>`
+
+**3. IPCEntitySpawner (Маршрутизатор spawn):**
+- Wrapper вокруг EntitySpawner
+- Автоматически выбирает: IPC (Dedi) или direct spawn (PfServer)
+- Единый интерфейс `IEntitySpawner` для всего кода
+
+### Критические исправления
+
+**1. Порядок инициализации в Dedi:**
+```csharp
+// ПРАВИЛЬНО (текущая реализация):
+NetworkBridge → IPCEntitySpawner → StageManager → ColonyManager → ColonyTickModule
+
+// НЕПРАВИЛЬНО (старый подход):
+EntitySpawner → StageManager → ... → замена на IPCEntitySpawner (модули держат старые ссылки!)
+```
+
+**2. Гарантированная готовность PfServer:**
+```csharp
+// Двойная защита:
+// a) OnPlayfieldLoaded подписка (IModApi, надежнее)
+modAPI.Application.OnPlayfieldLoaded += (pfInstance) => {
+    _currentPlayfield = pfInstance.Name;
+    _networkBridge.InitializeForPlayfieldServer(_currentPlayfield);
+};
+
+// b) Event_Playfield_Loaded (через Game_Event, fallback)
+if (eventId == Event_Playfield_Loaded) { ... }
+```
+
+**3. Жесткая проверка playfield:**
+```csharp
+// КРИТИЧНО: проверка ДО spawn!
+if (spawnReq.Playfield != _currentPlayfield)
+{
+    return new SpawnStructureResponse {
+        Success = false,
+        ErrorMessage = "Playfield mismatch! Cannot spawn in wrong playfield!"
+    };
+}
+```
+
+**4. NPC spawn через IPC:**
+- Раньше: warning + direct spawn в Dedi → PlayfieldConnectionNotFound
+- Теперь: полноценный IPC с `SpawnNPCRequest/Response`
+
+### Логирование IPC операций
+
+```
+[Dedi-4914] Sending IPC spawn request: Base_L1 on Temperate Planet (RequestId=abc-123)
+[PfServer-5120] Handling IPC request: SpawnStructure (playfield: Temperate Planet)
+[PfServer-5120] ✅ Structure spawn successful: EntityId=12345
+[Dedi-4914] ✅ IPC spawn successful: EntityId=12345 (took 150ms)
+```
+
+Префикс `[Dedi-PID]` / `[PfServer-PID]` добавляется через NLog GlobalDiagnosticsContext.
+
+### Производительность IPC
+
+- **Overhead**: ~50-200ms дополнительно к обычному spawn
+- **Состав задержки**:
+  - JSON сериализация: ~1-5ms
+  - INetwork передача: ~20-100ms (туда)
+  - Spawn в PfServer: ~300-500ms
+  - INetwork ответ: ~20-100ms (обратно)
+- **Приемлемо**: Для spawn операций это незначительная задержка
+
+### Отличия от старого подхода
+
+| Аспект | Старый подход (Game_Update) | Новый подход (IPC) |
+|--------|----------------------------|-------------------|
+| Где spawn? | Попытка в Dedi (❌ не работает) | PfServer через IPC (✅ работает) |
+| Retry логика | В Game_Update (throttling 3s) | IPC + таймауты 15s |
+| NPC spawn | Direct spawn (❌ ошибка) | IPC (✅ работает) |
+| Граф зависимостей | Модули держат старые ссылки | IPCEntitySpawner с начала |
+| Готовность playfield | Event_Playfield_Loaded + задержка | OnPlayfieldLoaded + жесткая проверка |
+| Логирование | Без префикса процесса | [Dedi-PID] / [PfServer-PID] |
+
+### Почему это критично?
+
+**Без IPC:** `PlayfieldConnectionNotFound` - Dedi процесс не может спавнить  
+**С IPC:** Spawn в правильном процессе - всегда работает
+
+**Полная документация:** См. [12_Multi_Process_IPC_Architecture.md](12_Multi_Process_IPC_Architecture.md)
+
+---
+
 ## См. также
 
+- **[12_Multi_Process_IPC_Architecture.md](12_Multi_Process_IPC_Architecture.md)** - Полная документация по IPC
 - [Module 07: Colony Evolution](modules/Module_07_Colony_Evolution.md)
 - [Module 04: Entity Spawner](modules/Module_04_Entity_Spawner.md)
 - [Module 06: Placement Resolver](modules/Module_06_Placement_Resolver.md)
