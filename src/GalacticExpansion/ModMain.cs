@@ -51,6 +51,7 @@ namespace GalacticExpansion
         private DateTime _lastBackupTime;
         private DateTime _lastMaterializationAttempt = DateTime.MinValue; // Для throttling материализации (Dedi)
         private bool _isInitialized = false; // Флаг инициализации
+        private bool _simulationStarted = false; // Флаг запуска симуляции (для отложенного старта)
 
         /// <summary>
         /// Инициализация мода.
@@ -119,151 +120,19 @@ namespace GalacticExpansion
                     _container.Register<ModGameAPI>(_modApi);
                 }
 
-                // 5. Инициализируем Gateway (только если ModGameAPI доступен)
-                if (_modApi != null)
-                {
-                    _logger.Info("Initializing Empyrion Gateway...");
-                    _gateway = new EmpyrionGateway(
-                        _modApi, 
-                        _config.Limits.MaxRequestsPerSecond
-                    );
-                    _container.Register<IEmpyrionGateway>(_gateway);
-                    _gateway.Start();
-                    _logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
-                }
-                else
-                {
-                    _logger.Warn("Skipping Gateway initialization - will initialize in IMod.Init with IModApi");
-                }
-
-                // 6. Инициализируем StateStore
+                // 5. ОТЛОЖЕННАЯ инициализация - НЕ создаем Gateway и модули в Game_Start
+                // Полная инициализация произойдет в IMod.Init() когда будет доступен IModApi
+                _logger.Info("Skipping Gateway and modules initialization - will initialize in IMod.Init");
+                _logger.Info("Deferred initialization mode - waiting for IMod.Init with IModApi");
+                
+                // 6. Инициализируем только StateStore (нужен для сохранения состояния)
                 _logger.Info("Initializing State Store...");
                 _stateStore = new StateStore(modPath);
                 _container.Register<IStateStore>(_stateStore);
-
-                // Если Gateway не инициализирован (single-player), отложим полную инициализацию до IMod.Init
-                if (_gateway == null)
-                {
-                    _logger.Info("Deferred initialization mode - waiting for IMod.Init with IModApi");
-                    return; // Выходим из Game_Start, продолжим в Init()
-                }
-
-                // 7. Инициализируем Phase 2/3: Core Loop и доменные компоненты
-                _logger.Info("Initializing Phase 2/3 components...");
                 
-                // EventBus для внутренней коммуникации модулей
-                var eventBus = new EventBus(_logger);
-                _container.Register<IEventBus>(eventBus);
-                _logger.Info("EventBus initialized");
-                
-                // ModuleRegistry для управления модулями
-                var moduleRegistry = new ModuleRegistry(_logger);
-                _container.Register<IModuleRegistry>(moduleRegistry);
-                _logger.Info("ModuleRegistry initialized");
-                
-                // SimulationEngine - главный движок симуляции
-                _simulationEngine = new SimulationEngine(
-                    _stateStore,
-                    moduleRegistry,
-                    eventBus,
-                    _logger
-                );
-                _container.Register<ISimulationEngine>(_simulationEngine);
-                
-                // 8. Регистрируем модули симуляции
-                _logger.Info("Registering simulation modules...");
-                
-                // PlayerTracker - отслеживание игроков
-                var playerTracker = new PlayerTracker(_gateway, eventBus, _logger);
-                _simulationEngine.RegisterModule(playerTracker);
-                _container.Register<IPlayerTracker>(playerTracker);
-                _logger.Info("PlayerTracker registered");
-                
-                // StructureTracker - отслеживание структур
-                var structureTracker = new StructureTracker(_gateway, eventBus, _logger);
-                _simulationEngine.RegisterModule(structureTracker);
-                _container.Register<IStructureTracker>(structureTracker);
-                _logger.Info("StructureTracker registered");
-                
-                // Регистрируем Phase 3 Domain модули
-                _logger.Info("Registering Phase 3 domain modules...");
-                
-                // PlacementResolver - поиск мест для структур
-                // IModApi в Game_Start ещё нет (появляется в IMod.Init); передаём null, в Init вызовем SetModApi
-                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, modApi: null);
-                _container.Register<IPlacementResolver>(placementResolver);
-                _logger.Info("PlacementResolver registered (terrain height: will use IPlayfield after IMod.Init, fallback 100m until then)");
-
-                
-                // EntitySpawner - спавн структур и NPC
-                var entitySpawner = new EntitySpawner(_gateway, placementResolver, _logger);
-                _container.Register<IEntitySpawner>(entitySpawner);
-                _logger.Info("EntitySpawner registered");
-                
-                // EconomySimulator - виртуальная экономика
-                var economySimulator = new EconomySimulator(_config, _logger);
-                _container.Register<IEconomySimulator>(economySimulator);
-                _logger.Info("EconomySimulator registered");
-                
-                // UnitEconomyManager - управление юнитами
-                var unitEconomyManager = new UnitEconomyManager(_config, _logger);
-                _container.Register<IUnitEconomyManager>(unitEconomyManager);
-                _logger.Info("UnitEconomyManager registered");
-                
-                // StageManager - управление стадиями колоний
-                var stageManager = new StageManager(
-                    _gateway,
-                    entitySpawner,
-                    placementResolver,
-                    economySimulator,
-                    unitEconomyManager,
-                    _stateStore,
-                    eventBus,
-                    _config,
-                    _logger
-                );
-                _container.Register<IStageManager>(stageManager);
-                _logger.Info("StageManager registered");
-                
-                // ColonyManager - координация модулей (сохраняем для вызова из Game_Update)
-                var colonyManager = new ColonyManager(
-                    _gateway,
-                    stageManager,
-                    economySimulator,
-                    unitEconomyManager,
-                    _stateStore,
-                    _logger
-                );
-                _colonyManager = colonyManager;
-                // ColonyManager не является модулем симуляции, только координатором
-                _container.Register<IColonyManager>(colonyManager);
-                _logger.Info("ColonyManager registered");
-
-                // ColonyTickModule — обновление колоний по тику и материализация при Event_Playfield_Loaded с задержкой.
-                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
-                _simulationEngine.RegisterModule(colonyTickModule);
-                _logger.Info("ColonyTickModule registered");
-                
-                // 9. Запускаем симуляцию
-                _logger.Info("Starting simulation engine...");
-                _ = Task.Run(async () => await _simulationEngine.StartAsync());
-                
-                // Даем время на инициализацию
-                Task.Delay(500).Wait();
-                
-                // Получаем текущее состояние из движка
-                _currentState = _simulationEngine.State;
-
-                // 10. Инициализируем таймеры
-                _lastBackupTime = DateTime.UtcNow;
-
-                // 11. Логируем успешную инициализацию
+                // Устанавливаем флаг базовой инициализации
                 _logger.Info("========================================");
-                _logger.Info("GLEX initialized successfully!");
-                _logger.Info($"  Home Playfield: {_config.HomePlayfield}");
-                _logger.Info($"  Expansion: {(_config.EnableExpansion ? "Enabled" : "Disabled")}");
-                _logger.Info($"  Tick Interval: {_config.Simulation.TickIntervalMs}ms");
-                _logger.Info($"  Auto-save: every {_config.Simulation.SaveIntervalMinutes} minute(s)");
+                _logger.Info("GLEX basic initialization complete. Waiting for IMod.Init...");
                 _logger.Info("========================================");
                 
                 // Устанавливаем флаг успешной инициализации
@@ -303,6 +172,40 @@ namespace GalacticExpansion
                             _networkBridge.InitializeForPlayfieldServer(_currentPlayfield);
                             _logger?.Info($"✅ [PfServer] NetworkBridge fully initialized for '{_currentPlayfield}'");
                         }
+                    }
+                }
+                
+                // КРИТИЧЕСКИ ВАЖНО для Dedi: Event_Playfield_Loaded - первый раз запускаем симуляцию с задержкой 30 секунд
+                if (_processMode == ApplicationMode.DedicatedServer && eventId == CmdId.Event_Playfield_Loaded && !_simulationStarted)
+                {
+                    if (data is PlayfieldLoad pfLoad && !string.IsNullOrEmpty(pfLoad.playfield))
+                    {
+                        _logger?.Info($"[Dedi] Event_Playfield_Loaded: {pfLoad.playfield} - scheduling simulation start in 30 seconds");
+                        
+                        // Отложенный запуск симуляции
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(30));
+                            
+                            if (_simulationEngine != null && !_simulationEngine.IsRunning)
+                            {
+                                _logger?.Info("[Dedi] Starting simulation engine (delayed start)...");
+                                await _simulationEngine.StartAsync();
+                                
+                                await Task.Delay(500);
+                                
+                                _currentState = _simulationEngine.State;
+                                _lastBackupTime = DateTime.UtcNow;
+                                _simulationStarted = true;
+                                
+                                _logger?.Info("========================================");
+                                _logger?.Info("[Dedi] GLEX simulation started successfully!");
+                                _logger?.Info($"  Delayed start: 30 seconds after first playfield load");
+                                _logger?.Info($"  Home Playfield: {_config?.HomePlayfield}");
+                                _logger?.Info($"  Tick Interval: {_config?.Simulation.TickIntervalMs}ms");
+                                _logger?.Info("========================================");
+                            }
+                        });
                     }
                 }
 
@@ -583,174 +486,6 @@ namespace GalacticExpansion
         }
 
         /// <summary>
-        /// Инициализирует Gateway и модули симуляции (вызывается либо из Game_Start, либо из Init)
-        /// </summary>
-        private void InitializeGatewayAndModules()
-        {
-            try
-            {
-                if (_logger == null)
-                {
-                    throw new InvalidOperationException("Logger must be initialized before calling InitializeGatewayAndModules");
-                }
-
-                // Локальная переменная для работы с logger (избегаем warnings)
-                var logger = _logger;
-
-                // Определяем путь к моду (если ещё не определён)
-                if (_config == null)
-                {
-                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
-                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
-                    
-                    logger.Info($"Loading configuration from: {modPath}");
-                    var configLoader = new ConfigurationLoader(modPath);
-                    _config = configLoader.Load();
-                    UpdateLogLevel(_config.LogLevel);
-                }
-
-                // Создаем контейнер если ещё не создан
-                if (_container == null)
-                {
-                    _container = new ServiceContainer();
-                    _container.Register<ILogger>(logger);
-                    _container.Register<Configuration>(_config);
-                }
-
-                // Регистрируем ModGameAPI если доступен
-                if (_modApi != null)
-                {
-                    _container.Register<ModGameAPI>(_modApi);
-                }
-
-                // Инициализируем Gateway (требуется ModGameAPI)
-                if (_modApi == null)
-                {
-                    logger.Error("Cannot initialize Gateway - ModGameAPI is null");
-                    throw new InvalidOperationException("ModGameAPI is required for Gateway initialization");
-                }
-
-                logger.Info("Initializing Empyrion Gateway...");
-                _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
-                _container.Register<IEmpyrionGateway>(_gateway);
-                _gateway.Start();
-                logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
-
-                // Инициализируем StateStore если ещё не создан
-                if (_stateStore == null)
-                {
-                    var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
-                    var modPath = System.IO.Path.Combine(gameRoot, "Content", "Mods", "GalacticExpansion");
-                    
-                    logger.Info("Initializing State Store...");
-                    _stateStore = new StateStore(modPath);
-                    _container.Register<IStateStore>(_stateStore);
-                }
-
-                // Инициализируем Phase 2/3: Core Loop и доменные компоненты
-                logger.Info("Initializing Phase 2/3 components...");
-                
-                // EventBus
-                var eventBus = new EventBus(logger);
-                _container.Register<IEventBus>(eventBus);
-                logger.Info("EventBus initialized");
-                
-                // ModuleRegistry
-                var moduleRegistry = new ModuleRegistry(_logger);
-                _container.Register<IModuleRegistry>(moduleRegistry);
-                _logger.Info("ModuleRegistry initialized");
-                
-                // SimulationEngine
-                _simulationEngine = new SimulationEngine(_stateStore, moduleRegistry, eventBus, _logger);
-                _container.Register<ISimulationEngine>(_simulationEngine);
-                
-                // Регистрируем модули симуляции
-                _logger.Info("Registering simulation modules...");
-                
-                // PlayerTracker
-                var playerTracker = new PlayerTracker(_gateway, eventBus, _logger);
-                _simulationEngine.RegisterModule(playerTracker);
-                _container.Register<IPlayerTracker>(playerTracker);
-                _logger.Info("PlayerTracker registered");
-                
-                // StructureTracker
-                var structureTracker = new StructureTracker(_gateway, eventBus, _logger);
-                _simulationEngine.RegisterModule(structureTracker);
-                _container.Register<IStructureTracker>(structureTracker);
-                _logger.Info("StructureTracker registered");
-                
-                // Регистрируем Phase 3 Domain модули
-                _logger.Info("Registering Phase 3 domain modules...");
-                
-                // PlacementResolver
-                var placementResolver = new PlacementResolver(_gateway, playerTracker, _logger, modApi: _extendedModApi);
-                _container.Register<IPlacementResolver>(placementResolver);
-                _logger.Info("PlacementResolver registered");
-                
-                // EntitySpawner
-                var entitySpawner = new EntitySpawner(_gateway, placementResolver, _logger);
-                _container.Register<IEntitySpawner>(entitySpawner);
-                _logger.Info("EntitySpawner registered");
-                
-                // EconomySimulator
-                var economySimulator = new EconomySimulator(_config, _logger);
-                _container.Register<IEconomySimulator>(economySimulator);
-                _logger.Info("EconomySimulator registered");
-                
-                // UnitEconomyManager
-                var unitEconomyManager = new UnitEconomyManager(_config, _logger);
-                _container.Register<IUnitEconomyManager>(unitEconomyManager);
-                _logger.Info("UnitEconomyManager registered");
-                
-                // StageManager
-                var stageManager = new StageManager(
-                    _gateway, entitySpawner, placementResolver, economySimulator,
-                    unitEconomyManager, _stateStore, eventBus, _config, _logger
-                );
-                _container.Register<IStageManager>(stageManager);
-                _logger.Info("StageManager registered");
-                
-                // ColonyManager (сохраняем для вызова из Game_Update)
-                var colonyManager = new ColonyManager(
-                    _gateway, stageManager, economySimulator,
-                    unitEconomyManager, _stateStore, _logger
-                );
-                _colonyManager = colonyManager;
-                _container.Register<IColonyManager>(colonyManager);
-                _logger.Info("ColonyManager registered");
-
-                // ColonyTickModule
-                var colonyTickModule = new ColonyTickModule(_gateway, colonyManager, placementResolver, eventBus, _config, _logger);
-                _simulationEngine.RegisterModule(colonyTickModule);
-                _logger.Info("ColonyTickModule registered");
-                
-                // Запускаем симуляцию
-                _logger.Info("Starting simulation engine...");
-                _ = Task.Run(async () => await _simulationEngine.StartAsync());
-                
-                Task.Delay(500).Wait();
-                
-                _currentState = _simulationEngine.State;
-                _lastBackupTime = DateTime.UtcNow;
-
-                _logger.Info("========================================");
-                _logger.Info("GLEX initialized successfully!");
-                _logger.Info($"  Home Playfield: {_config.HomePlayfield}");
-                _logger.Info($"  Expansion: {(_config.EnableExpansion ? "Enabled" : "Disabled")}");
-                _logger.Info($"  Tick Interval: {_config.Simulation.TickIntervalMs}ms");
-                _logger.Info($"  Auto-save: every {_config.Simulation.SaveIntervalMinutes} minute(s)");
-                _logger.Info("========================================");
-                
-                _isInitialized = true;
-            }
-            catch (Exception ex)
-            {
-                _logger?.Fatal(ex, "FATAL ERROR during gateway and modules initialization!");
-                throw;
-            }
-        }
-
-        /// <summary>
         /// Инициализация для Dedicated Server процесса.
         /// КРИТИЧНО: NetworkBridge и IPCEntitySpawner создаются ДО модулей, чтобы весь граф зависимостей был правильным!
         /// </summary>
@@ -847,20 +582,25 @@ namespace GalacticExpansion
                 if (_modApi != null)
                     _container.Register<ModGameAPI>(_modApi);
 
-                // Gateway
-                if (_modApi == null)
+                // Gateway - защита от двойной инициализации
+                if (_gateway == null)
                 {
-                    logger.Error("Cannot initialize Gateway - ModGameAPI is null");
-                    throw new InvalidOperationException("ModGameAPI required");
+                    if (_modApi == null)
+                    {
+                        logger.Error("Cannot initialize Gateway - ModGameAPI is null");
+                        throw new InvalidOperationException("ModGameAPI required");
+                    }
+
+                    logger.Info("Initializing Empyrion Gateway...");
+                    _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
+                    _container.Register<IEmpyrionGateway>(_gateway);
+                    _gateway.Start();
+                    logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
                 }
-
-                logger.Info("Initializing Empyrion Gateway...");
-                _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
-                _container.Register<IEmpyrionGateway>(_gateway);
-                _gateway.Start();
-                logger.Info($"Gateway started (rate limit: {_config.Limits.MaxRequestsPerSecond} req/sec)");
-
-                // StateStore
+                else
+                {
+                    logger.Debug("Gateway already initialized, skipping");
+                }
                 if (_stateStore == null)
                 {
                     var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
@@ -963,22 +703,17 @@ namespace GalacticExpansion
                 _simulationEngine.RegisterModule(colonyTickModule);
                 logger.Info("ColonyTickModule registered");
                 
-                // Запускаем симуляцию
-                logger.Info("Starting simulation engine...");
-                _ = Task.Run(async () => await _simulationEngine.StartAsync());
+                // НЕ ЗАПУСКАЕМ симуляцию сразу - запуск произойдет через 30 секунд после первого Event_Playfield_Loaded
+                logger.Info("SimulationEngine created (will start after first playfield loads + 30 sec delay)");
                 
-                Task.Delay(500).Wait();
-                
-                _currentState = _simulationEngine.State;
                 _lastBackupTime = DateTime.UtcNow;
 
                 logger.Info("========================================");
                 logger.Info("GLEX Dedi process initialized successfully!");
                 logger.Info($"  Home Playfield: {_config.HomePlayfield}");
                 logger.Info($"  IPC Mode: ENABLED (spawn via NetworkBridge)");
+                logger.Info($"  Simulation: DEFERRED (will start 30 sec after first playfield load)");
                 logger.Info("========================================");
-                
-                _isInitialized = true;
             }
             catch (Exception ex)
             {
