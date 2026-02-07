@@ -989,18 +989,18 @@ namespace GalacticExpansion
 
         /// <summary>
         /// Инициализация для PlayfieldServer процесса.
-        /// ЛЕГКОВЕСНАЯ инициализация: только NetworkBridge (IPC receiver) + EntitySpawner для выполнения spawn.
-        /// НЕТ симуляции, логики колоний - это все в Dedi процессе.
-        /// КРИТИЧНО: Подписка на OnPlayfieldLoaded для гарантированной готовности playfield!
+        /// НОВАЯ АРХИТЕКТУРА: Использует NativePlayfieldSpawner для прямого спавна через IPlayfield API.
+        /// НЕ требует ModGameAPI - работает через прямой доступ к IPlayfield instance.
+        /// КРИТИЧНО: Подписка на OnPlayfieldLoaded для получения IPlayfield и создания NativePlayfieldSpawner.
         /// </summary>
         private void InitializePlayfieldServer(IModApi modAPI)
         {
             try
             {
-                _logger?.Info("PfServer initialization - minimal setup for spawn operations");
+                _logger?.Info("PfServer initialization - NATIVE playfield spawn mode (no ModGameAPI required)");
 
-                // КРИТИЧНО: Подписываемся на OnPlayfieldLoaded для гарантированной готовности
-                // Это надежнее чем Event_Playfield_Loaded через Game_Event
+                // КРИТИЧНО: Подписываемся на OnPlayfieldLoaded для получения IPlayfield instance
+                // Это единственный способ получить прямой доступ к playfield для нативного спавна
                 modAPI.Application.OnPlayfieldLoaded += (pfInstance) =>
                 {
                     try
@@ -1012,11 +1012,23 @@ namespace GalacticExpansion
                         // Сохраняем название playfield
                         _currentPlayfield = pfName;
                         
+                        // КРИТИЧНО: Создаем NativePlayfieldSpawner с прямым доступом к IPlayfield
+                        // Это полностью заменяет Gateway + EntitySpawner + PlacementResolver в PfServer!
+                        var nativeSpawner = new NativePlayfieldSpawner(pfInstance, _logger ?? LogManager.GetCurrentClassLogger());
+                        _logger?.Info($"✅ [PfServer] NativePlayfieldSpawner created for '{pfName}' (direct IPlayfield access)");
+                        
                         // Завершаем инициализацию NetworkBridge (теперь знаем playfield)
                         if (_networkBridge != null && !string.IsNullOrEmpty(_currentPlayfield))
                         {
                             _networkBridge.InitializeForPlayfieldServer(_currentPlayfield);
                             _logger?.Info($"✅ [PfServer] NetworkBridge fully initialized for '{_currentPlayfield}' (ready for IPC)");
+                            
+                            // Регистрируем обработчик IPC запросов с нативным спавнером
+                            _networkBridge.OnRequestReceived += async (request, pfName) => 
+                            {
+                                return await HandleIPCRequestWithNativeSpawner(request, pfName, nativeSpawner);
+                            };
+                            _logger?.Info($"✅ [PfServer] IPC handler registered with NativePlayfieldSpawner");
                         }
                         else
                         {
@@ -1030,19 +1042,7 @@ namespace GalacticExpansion
                 };
                 _logger?.Info("✅ [PfServer] Subscribed to OnPlayfieldLoaded");
 
-                // Извлекаем ModGameAPI
-                var gameApiProperty = modAPI.GetType().GetProperty("GameAPI") ?? modAPI.GetType().GetProperty("API");
-                if (gameApiProperty != null)
-                {
-                    var gameApi = gameApiProperty.GetValue(modAPI) as ModGameAPI;
-                    if (gameApi != null)
-                    {
-                        _modApi = gameApi;
-                        _logger?.Info("✅ ModGameAPI extracted for PfServer");
-                    }
-                }
-
-                // Минимальная конфигурация (только для spawn limits)
+                // Минимальная конфигурация (для логирования)
                 if (_config == null)
                 {
                     var gameRoot = System.IO.Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
@@ -1051,53 +1051,13 @@ namespace GalacticExpansion
                     _config = configLoader.Load();
                 }
 
-                // Создаем минимальный контейнер
-                _container = new ServiceContainer();
-                _container.Register<ILogger>(_logger ?? LogManager.GetCurrentClassLogger());
-                _container.Register<Configuration>(_config);
-                if (_modApi != null)
-                    _container.Register<ModGameAPI>(_modApi);
-
-                // Gateway для spawn операций
-                if (_modApi != null)
-                {
-                    _logger?.Info("Initializing Gateway for PfServer spawn operations...");
-                    _gateway = new EmpyrionGateway(_modApi, _config.Limits.MaxRequestsPerSecond);
-                    _container.Register<IEmpyrionGateway>(_gateway);
-                    _gateway.Start();
-                    _logger?.Info("✅ Gateway started for PfServer");
-                }
-
-                // PlacementResolver (для определения высоты) и EntitySpawner (для spawn)
-                var logger = _logger ?? LogManager.GetCurrentClassLogger();
-                var gateway = _gateway ?? throw new InvalidOperationException("Gateway required for PfServer");
-                
-                var placementResolver = new PlacementResolver(gateway, null, logger, modAPI);
-                _container.Register<IPlacementResolver>(placementResolver);
-
-                // Создаем обычный EntitySpawner (для прямого spawn в PfServer)
-                var directSpawner = new EntitySpawner(gateway, placementResolver, logger);
-                
-                // Оборачиваем в IPCEntitySpawner (для PfServer он просто делегирует к directSpawner)
-                var ipcSpawner = new IPCEntitySpawner(
-                    directSpawner,
-                    ApplicationMode.PlayfieldServer,
-                    logger
-                );
-                
-                _container.Register<IEntitySpawner>(ipcSpawner);
-                _logger?.Info("✅ IPCEntitySpawner initialized for PfServer (direct spawn mode)");
-
                 // Инициализируем NetworkBridge для приема IPC команд от Dedi
-                // ВАЖНО: название playfield будет установлено когда получим Event_Playfield_Loaded
+                // ВАЖНО: название playfield и IPC handler будут установлены в OnPlayfieldLoaded
                 _logger?.Info("Initializing NetworkBridge for PfServer...");
                 _networkBridge = new NetworkBridge(modAPI, _logger ?? LogManager.GetCurrentClassLogger());
                 
-                // Регистрируем обработчик IPC запросов
-                _networkBridge.OnRequestReceived += HandleIPCRequestAsync;
-                
-                // ВАЖНО: InitializeForPlayfieldServer будет вызван из Event_Playfield_Loaded когда узнаем название playfield
-                _logger?.Info("⏳ NetworkBridge created, waiting for Event_Playfield_Loaded to complete registration");
+                // ВАЖНО: InitializeForPlayfieldServer и OnRequestReceived будут вызваны из OnPlayfieldLoaded
+                _logger?.Info("⏳ NetworkBridge created, waiting for OnPlayfieldLoaded to complete registration");
             }
             catch (Exception ex)
             {
@@ -1264,6 +1224,151 @@ namespace GalacticExpansion
             catch (Exception ex)
             {
                 _logger?.Error(ex, "[PfServer] Error handling IPC request");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Обработчик IPC запросов с использованием NativePlayfieldSpawner (НОВАЯ АРХИТЕКТУРА).
+        /// Вызывается в PfServer процессе для обработки команд спавна от Dedi через прямой IPlayfield API.
+        /// КРИТИЧНО: Жесткая проверка playfield перед выполнением операций!
+        /// </summary>
+        private async Task<IPCMessage?> HandleIPCRequestWithNativeSpawner(
+            IPCMessage request, 
+            string playfieldName, 
+            INativePlayfieldSpawner spawner)
+        {
+            try
+            {
+                _logger?.Info($"[PfServer-Native] Handling IPC request: {request.MessageType} (playfield: {playfieldName})");
+
+                if (request is SpawnStructureRequest spawnReq)
+                {
+                    // КРИТИЧНО: Жесткая проверка playfield!
+                    // Если не совпадает - возвращаем ошибку, НЕ продолжаем!
+                    if (spawnReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={spawnReq.Playfield}, Current={_currentPlayfield}. Cannot spawn in wrong playfield!";
+                        _logger?.Error($"[PfServer-Native] ❌ {error}");
+                        return new SpawnStructureResponse
+                        {
+                            Success = false,
+                            ErrorMessage = error,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+
+                    try
+                    {
+                        // Конвертируем позицию и ротацию из IPC данных в Unity типы
+                        var position = UnityTypeConverter.ToUnityVector3(
+                            new Models.Vector3(spawnReq.Position[0], spawnReq.Position[1], spawnReq.Position[2])
+                        );
+                        var rotation = UnityTypeConverter.ToUnityQuaternion(
+                            new Models.Vector3(spawnReq.Rotation[0], spawnReq.Rotation[1], spawnReq.Rotation[2])
+                        );
+
+                        _logger?.Info($"[PfServer-Native] Spawning structure {spawnReq.PrefabName} at {position}");
+                        
+                        // ПРЯМОЙ СПАВН через IPlayfield.SpawnPrefab()!
+                        var entityId = await spawner.SpawnStructureAsync(spawnReq.PrefabName, position, rotation);
+
+                        _logger?.Info($"[PfServer-Native] ✅ Structure spawn successful: EntityId={entityId}");
+
+                        return new SpawnStructureResponse
+                        {
+                            Success = true,
+                            EntityId = entityId,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer-Native] ❌ Structure spawn failed: {spawnReq.PrefabName}");
+                        return new SpawnStructureResponse
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = spawnReq.Playfield
+                        };
+                    }
+                }
+                else if (request is SpawnNPCRequest npcReq)
+                {
+                    // КРИТИЧНО: Жесткая проверка playfield для NPC!
+                    if (npcReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={npcReq.Playfield}, Current={_currentPlayfield}. Cannot spawn NPC in wrong playfield!";
+                        _logger?.Error($"[PfServer-Native] ❌ {error}");
+                        return new SpawnNPCResponse
+                        {
+                            Success = false,
+                            ErrorMessage = error,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+
+                    try
+                    {
+                        // Для NPC используем terrain height из NativePlayfieldSpawner
+                        float x = npcReq.Position[0];
+                        float z = npcReq.Position[2];
+                        
+                        // Получаем высоту рельефа через прямой вызов IPlayfield.GetTerrainHeightAt()
+                        float terrainHeight = spawner.GetTerrainHeight(x, z);
+                        float y = terrainHeight + 0.5f; // Offset над землей
+
+                        var position = new UnityEngine.Vector3(x, y, z);
+                        var rotation = UnityTypeConverter.ToUnityQuaternion(
+                            new Models.Vector3(npcReq.Rotation[0], npcReq.Rotation[1], npcReq.Rotation[2])
+                        );
+
+                        _logger?.Info($"[PfServer-Native] Spawning NPC {npcReq.NPCClassName} at ({x}, {y}, {z})");
+                        
+                        // ПРЯМОЙ СПАВН через IPlayfield.SpawnEntity()!
+                        var entityId = await spawner.SpawnNPCAsync(npcReq.NPCClassName, position, rotation);
+
+                        _logger?.Info($"[PfServer-Native] ✅ NPC spawn successful: EntityId={entityId}");
+
+                        return new SpawnNPCResponse
+                        {
+                            Success = true,
+                            EntityId = entityId,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer-Native] ❌ NPC spawn failed: {npcReq.NPCClassName}");
+                        return new SpawnNPCResponse
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = npcReq.Playfield
+                        };
+                    }
+                }
+                else if (request is PlayfieldReadyRequest readyReq)
+                {
+                    // Проверка готовности playfield (теперь без зависимости от Gateway)
+                    bool isReady = _currentPlayfield == readyReq.Playfield && spawner != null;
+                    
+                    _logger?.Info($"[PfServer-Native] Playfield ready check: {isReady}");
+                    
+                    return new PlayfieldReadyResponse
+                    {
+                        IsReady = isReady,
+                        Playfield = readyReq.Playfield,
+                        Info = isReady ? "Playfield loaded and ready (native spawner)" : "Playfield not loaded or name mismatch"
+                    };
+                }
+
+                _logger?.Warn($"[PfServer-Native] Unknown request type: {request.MessageType}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error(ex, "[PfServer-Native] Error handling IPC request");
                 return null;
             }
         }
