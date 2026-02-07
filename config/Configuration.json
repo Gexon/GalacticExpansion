@@ -1,5 +1,6 @@
 {
   "Version": "1.0",
+  "EmpyrionPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Empyrion - Galactic Survival",
   "LogLevel": "Information",
   "Simulation": {
     "TickIntervalMs": 1000,

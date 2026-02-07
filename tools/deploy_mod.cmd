@@ -12,7 +12,8 @@ REM   build_config - конфигурация сборки (Debug или Release
 REM
 REM Пути:
 REM   Проект: E:\for_game\Empyrion\GalacticExpansion
-REM   Папка модов Empyrion: D:\SteamLibrary\steamapps\common\Empyrion - Galactic Survival\Content\Mods
+REM   Путь к игре: загружается из config\Configuration.json (EmpyrionPath)
+REM   Фаллбек: C:\Program Files (x86)\Steam\steamapps\common\Empyrion - Galactic Survival
 REM =============================================================================
 
 setlocal enabledelayedexpansion
@@ -21,10 +22,34 @@ REM ---------------------------------------------------------------------------
 REM Конфигурация путей
 REM ---------------------------------------------------------------------------
 set "PROJECT_DIR=E:\for_game\Empyrion\GalacticExpansion"
-set "EMPYRION_ROOT=D:\SteamLibrary\steamapps\common\Empyrion - Galactic Survival"
+
+REM Путь по умолчанию к игре (фаллбек)
+set "EMPYRION_ROOT=C:\Program Files (x86)\Steam\steamapps\common\Empyrion - Galactic Survival"
+set "CONFIG_FILE=%PROJECT_DIR%\config\Configuration.json"
+
+REM Попытка загрузить путь из конфигурации
+if exist "%CONFIG_FILE%" (
+    REM Ищем строку "EmpyrionPath" в JSON и извлекаем значение
+    for /f "usebackq tokens=* delims=" %%A in (`findstr /C:"EmpyrionPath" "%CONFIG_FILE%"`) do (
+        set "JSON_LINE=%%A"
+        REM Убираем всё до первых кавычек значения (после ":)
+        set "JSON_LINE=!JSON_LINE:*: "=!"
+        REM Убираем закрывающие кавычки и запятую
+        set "JSON_LINE=!JSON_LINE:",=!"
+        set "JSON_LINE=!JSON_LINE:"=!"
+        REM Заменяем \\ на \
+        set "JSON_LINE=!JSON_LINE:\\=\!"
+        REM Убираем пробелы в начале и конце
+        for /f "tokens=*" %%B in ("!JSON_LINE!") do set "TEMP_PATH=%%B"
+        if not "!TEMP_PATH!"=="" (
+            set "EMPYRION_ROOT=!TEMP_PATH!"
+            echo [INFO] Путь к игре загружен из конфигурации
+        )
+    )
+)
 
 REM Целевая папка мода (БЕЗ DedicatedServer - правильный путь!)
-set "MOD_TARGET=%EMPYRION_ROOT%\Content\Mods\GalacticExpansion"
+set "MOD_TARGET=!EMPYRION_ROOT!\Content\Mods\GalacticExpansion"
 set "CONFIG_DIR=%PROJECT_DIR%\config"
 
 REM Конфигурация сборки (Debug или Release)
@@ -68,15 +93,15 @@ REM ---------------------------------------------------------------------------
 echo.
 echo [2/8] Подготовка целевой папки...
 
-if not exist "%MOD_TARGET%" (
-    echo Создание новой папки мода: %MOD_TARGET%
-    mkdir "%MOD_TARGET%"
+if not exist "!MOD_TARGET!" (
+    echo Создание новой папки мода: !MOD_TARGET!
+    mkdir "!MOD_TARGET!"
     if errorlevel 1 (
         echo [ОШИБКА] Не удалось создать папку мода
         exit /b 1
     )
 ) else (
-    echo Папка мода уже существует: %MOD_TARGET%
+    echo Папка мода уже существует: !MOD_TARGET!
 )
 
 REM ---------------------------------------------------------------------------
@@ -86,23 +111,50 @@ echo.
 echo [3/8] Создание бэкапов...
 
 REM Создание папки для бэкапов, если не существует
-if not exist "%MOD_TARGET%\backups" mkdir "%MOD_TARGET%\backups"
+if not exist "!MOD_TARGET!\backups" mkdir "!MOD_TARGET!\backups"
 
-REM Бэкап основной DLL, если существует
-if exist "%MOD_TARGET%\GalacticExpansion.dll" (
-    echo Создание бэкапа: GalacticExpansion.dll ^-^> GalacticExpansion.dll.%TIMESTAMP%.backup
-    copy /Y "%MOD_TARGET%\GalacticExpansion.dll" "%MOD_TARGET%\backups\GalacticExpansion.dll.%TIMESTAMP%.backup" >nul
-    if errorlevel 1 (
-        echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось создать бэкап DLL
+REM Список файлов для бэкапа
+set "BACKUP_FILES=GalacticExpansion.dll GalacticExpansion.Core.dll GalacticExpansion.Models.dll NLog.dll Newtonsoft.Json.dll NLog.config Configuration.json state.json"
+
+REM Создаем временную папку для сбора файлов перед архивацией
+set "TEMP_BACKUP_DIR=!MOD_TARGET!\backups\temp_%TIMESTAMP%"
+if not exist "!TEMP_BACKUP_DIR!" mkdir "!TEMP_BACKUP_DIR!"
+
+REM Копируем файлы во временную папку
+set "FILES_TO_BACKUP=0"
+for %%F in (%BACKUP_FILES%) do (
+    if exist "!MOD_TARGET!\%%F" (
+        echo Подготовка к бэкапу: %%F
+        copy /Y "!MOD_TARGET!\%%F" "!TEMP_BACKUP_DIR!\%%F" >nul
+        if not errorlevel 1 (
+            set /a FILES_TO_BACKUP+=1
+        ) else (
+            echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось скопировать %%F
+        )
     )
 )
 
-REM Бэкап state.json, если существует
-if exist "%MOD_TARGET%\state.json" (
-    echo Создание бэкапа: state.json ^-^> state_pre_update_%TIMESTAMP%.json
-    copy /Y "%MOD_TARGET%\state.json" "%MOD_TARGET%\backups\state_pre_update_%TIMESTAMP%.json" >nul
+REM Создание архива всех файлов одним ZIP-файлом
+if !FILES_TO_BACKUP! GTR 0 (
+    echo Архивация !FILES_TO_BACKUP! файлов в backup_%TIMESTAMP%.zip...
+    
+    REM Используем .NET класс ZipFile для создания архива (работает на всех версиях Windows)
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; try { [System.IO.Compression.ZipFile]::CreateFromDirectory('!TEMP_BACKUP_DIR!', '!MOD_TARGET!\backups\backup_%TIMESTAMP%.zip'); Write-Host '[OK] Архив создан: backup_%TIMESTAMP%.zip' } catch { Write-Host '[ОШИБКА] Не удалось создать архив: ' + $_.Exception.Message; exit 1 }"
+    
     if errorlevel 1 (
-        echo [ПРЕДУПРЕЖДЕНИЕ] Не удалось создать бэкап state.json
+        echo [ПРЕДУПРЕЖДЕНИЕ] Архивация не удалась, файлы останутся во временной папке
+        echo Временная папка: !TEMP_BACKUP_DIR!
+    ) else (
+        REM Удаляем временную папку после успешной архивации
+        if exist "!TEMP_BACKUP_DIR!" (
+            rmdir /S /Q "!TEMP_BACKUP_DIR!" >nul 2>&1
+        )
+    )
+) else (
+    echo [ПРЕДУПРЕЖДЕНИЕ] Нет файлов для бэкапа
+    REM Удаляем пустую временную папку
+    if exist "!TEMP_BACKUP_DIR!" (
+        rmdir /Q "!TEMP_BACKUP_DIR!" >nul 2>&1
     )
 )
 
@@ -120,7 +172,7 @@ set "FAILED_COUNT=0"
 
 REM Копирование основной DLL
 echo Копирование: GalacticExpansion.dll
-copy /Y "%BUILD_DIR%\GalacticExpansion.dll" "%MOD_TARGET%\" >nul
+copy /Y "%BUILD_DIR%\GalacticExpansion.dll" "!MOD_TARGET!\" >nul
 if errorlevel 1 (
     echo [ОШИБКА] Не удалось скопировать GalacticExpansion.dll
     set /a FAILED_COUNT+=1
@@ -133,7 +185,7 @@ REM Копирование PDB (отладочная информация) дл�
 if "%BUILD_CONFIG%"=="Debug" (
     if exist "%BUILD_DIR%\GalacticExpansion.pdb" (
         echo Копирование: GalacticExpansion.pdb (отладочные символы)
-        copy /Y "%BUILD_DIR%\GalacticExpansion.pdb" "%MOD_TARGET%\" >nul
+        copy /Y "%BUILD_DIR%\GalacticExpansion.pdb" "!MOD_TARGET!\" >nul
         if not errorlevel 1 set /a COPIED_COUNT+=1
     )
 )
@@ -142,27 +194,27 @@ REM Копирование зависимостей
 echo Копирование зависимостей...
 if exist "%BUILD_DIR%\GalacticExpansion.Core.dll" (
     echo   - GalacticExpansion.Core.dll
-    copy /Y "%BUILD_DIR%\GalacticExpansion.Core.dll" "%MOD_TARGET%\" >nul
+    copy /Y "%BUILD_DIR%\GalacticExpansion.Core.dll" "!MOD_TARGET!\" >nul
     if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\GalacticExpansion.Models.dll" (
     echo   - GalacticExpansion.Models.dll
-    copy /Y "%BUILD_DIR%\GalacticExpansion.Models.dll" "%MOD_TARGET%\" >nul
+    copy /Y "%BUILD_DIR%\GalacticExpansion.Models.dll" "!MOD_TARGET!\" >nul
     if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\NLog.dll" (
     echo   - NLog.dll
-    copy /Y "%BUILD_DIR%\NLog.dll" "%MOD_TARGET%\" >nul
+    copy /Y "%BUILD_DIR%\NLog.dll" "!MOD_TARGET!\" >nul
     if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\Newtonsoft.Json.dll" (
     echo   - Newtonsoft.Json.dll
-    copy /Y "%BUILD_DIR%\Newtonsoft.Json.dll" "%MOD_TARGET%\" >nul
+    copy /Y "%BUILD_DIR%\Newtonsoft.Json.dll" "!MOD_TARGET!\" >nul
     if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 if exist "%BUILD_DIR%\NLog.config" (
     echo   - NLog.config
-    copy /Y "%BUILD_DIR%\NLog.config" "%MOD_TARGET%\" >nul
+    copy /Y "%BUILD_DIR%\NLog.config" "!MOD_TARGET!\" >nul
     if not errorlevel 1 set /a COPIED_COUNT+=1
 )
 
@@ -175,13 +227,13 @@ echo.
 echo [5/8] Проверка конфигурации...
 
 REM Проверяем наличие файла в целевой папке
-if exist "%MOD_TARGET%\Configuration.json" (
+if exist "!MOD_TARGET!\Configuration.json" (
     echo Сохранение существующей конфигурации ^(НЕ перезаписываем Configuration.json^)
 ) else (
     REM Конфигурации нет в целевой папке, копируем из config/
     if exist "%CONFIG_DIR%\Configuration.json" (
         echo Копирование конфигурации по умолчанию из config\Configuration.json
-        copy /Y "%CONFIG_DIR%\Configuration.json" "%MOD_TARGET%\" >nul
+        copy /Y "%CONFIG_DIR%\Configuration.json" "!MOD_TARGET!\" >nul
         if errorlevel 1 (
             echo [ОШИБКА] Не удалось скопировать Configuration.json
         ) else (
@@ -204,7 +256,7 @@ echo [6/8] Копирование дополнительных файлов...
 REM Копирование DllNames.txt (ОБЯЗАТЕЛЬНО для загрузки мода Empyrion!)
 if exist "%CONFIG_DIR%\GalacticExpansion_Info.yaml" (
     echo Копирование: GalacticExpansion_Info.yaml ^(обязательный файл мода^)
-    copy /Y "%CONFIG_DIR%\GalacticExpansion_Info.yaml" "%MOD_TARGET%\" >nul
+    copy /Y "%CONFIG_DIR%\GalacticExpansion_Info.yaml" "!MOD_TARGET!\" >nul
     if errorlevel 1 (
         echo [ОШИБКА] Не удалось скопировать GalacticExpansion_Info.yaml
     )
@@ -215,44 +267,44 @@ if exist "%CONFIG_DIR%\GalacticExpansion_Info.yaml" (
 REM Копирование README, если существует
 if exist "%PROJECT_DIR%\README.md" (
     echo Копирование: README.md
-    copy /Y "%PROJECT_DIR%\README.md" "%MOD_TARGET%\" >nul
+    copy /Y "%PROJECT_DIR%\README.md" "!MOD_TARGET!\" >nul
 )
 
 REM Копирование CHANGELOG, если существует
 if exist "%PROJECT_DIR%\CHANGELOG.md" (
     echo Копирование: CHANGELOG.md
-    copy /Y "%PROJECT_DIR%\CHANGELOG.md" "%MOD_TARGET%\" >nul
+    copy /Y "%PROJECT_DIR%\CHANGELOG.md" "!MOD_TARGET!\" >nul
 )
 
 echo [OK] Дополнительные файлы обработаны
 
 REM ---------------------------------------------------------------------------
-REM Очистка старых бэкапов (оставляем только последние 10)
+REM Очистка старых бэкапов (оставляем только последние 10 архивов)
 REM ---------------------------------------------------------------------------
 echo.
 echo [7/8] Очистка старых бэкапов...
 
-REM Подсчет количества бэкапов DLL
+REM Подсчет количества ZIP-архивов бэкапов
 set "BACKUP_COUNT=0"
-for %%F in ("%MOD_TARGET%\backups\GalacticExpansion.dll.*.backup") do set /a BACKUP_COUNT+=1
+for %%F in ("!MOD_TARGET!\backups\backup_*.zip") do set /a BACKUP_COUNT+=1
 
-REM Если бэкапов больше 10, удаляем самые старые
+REM Если архивов больше 10, удаляем самые старые
 if !BACKUP_COUNT! GTR 10 (
-    echo Найдено !BACKUP_COUNT! бэкапов, удаление старых...
+    echo Найдено !BACKUP_COUNT! архивов, удаление старых...
     REM Оставляем последние 10 файлов (сортируем по дате и удаляем первые N-10)
     set /a "TO_DELETE=!BACKUP_COUNT!-10"
     
     REM Формируем список файлов для удаления
     set "DELETE_INDEX=0"
-    for /f "delims=" %%F in ('dir /b /o:d "%MOD_TARGET%\backups\GalacticExpansion.dll.*.backup"') do (
+    for /f "delims=" %%F in ('dir /b /o:d "!MOD_TARGET!\backups\backup_*.zip"') do (
         set /a DELETE_INDEX+=1
         if !DELETE_INDEX! LEQ !TO_DELETE! (
-            echo Удаление старого бэкапа: %%F
-            del "%MOD_TARGET%\backups\%%F" >nul 2>&1
+            echo Удаление старого архива: %%F
+            del "!MOD_TARGET!\backups\%%F" >nul 2>&1
         )
     )
 ) else (
-    echo Бэкапов: !BACKUP_COUNT! ^(очистка не требуется^)
+    echo Архивов: !BACKUP_COUNT! ^(очистка не требуется^)
 )
 
 echo [OK] Очистка завершена
@@ -273,7 +325,7 @@ echo   - Скопировано файлов: %COPIED_COUNT%
 if %FAILED_COUNT% GTR 0 (
     echo   - Ошибок при копировании: %FAILED_COUNT%
 )
-echo   - Целевая папка: %MOD_TARGET%
+echo   - Целевая папка: !MOD_TARGET!
 echo.
 echo Мод готов к запуску!
 echo =========================================================================

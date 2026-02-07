@@ -1005,8 +1005,15 @@ namespace GalacticExpansion
                 {
                     try
                     {
+                        // Проверяем что pfInstance не null перед использованием
+                        if (pfInstance == null)
+                        {
+                            _logger?.Warn("[PfServer] OnPlayfieldLoaded called with null IPlayfield instance");
+                            return;
+                        }
+
                         // Получаем название playfield из IPlayfield instance
-                        var pfName = pfInstance?.Name ?? "Unknown";
+                        var pfName = pfInstance.Name ?? "Unknown";
                         _logger?.Info($"[PfServer] OnPlayfieldLoaded: {pfName} (IPlayfield instance received)");
                         
                         // Сохраняем название playfield

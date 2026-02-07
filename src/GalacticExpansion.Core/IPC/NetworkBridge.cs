@@ -34,6 +34,12 @@ namespace GalacticExpansion.Core.IPC
         /// </summary>
         public event Func<IPCMessage, string, Task<IPCMessage?>>? OnRequestReceived;
 
+        /// <summary>
+        /// Инициализирует новый экземпляр NetworkBridge для управления IPC коммуникацией.
+        /// </summary>
+        /// <param name="modApi">API мода для доступа к сетевым функциям Empyrion</param>
+        /// <param name="logger">Логгер для записи диагностической информации</param>
+        /// <exception cref="ArgumentNullException">Выбрасывается если modApi или logger равны null</exception>
         public NetworkBridge(IModApi modApi, ILogger logger)
         {
             _modApi = modApi ?? throw new ArgumentNullException(nameof(modApi));
@@ -319,6 +325,10 @@ namespace GalacticExpansion.Core.IPC
             }
         }
 
+        /// <summary>
+        /// Освобождает ресурсы NetworkBridge.
+        /// Завершает все ожидающие запросы с отменой и очищает внутренние коллекции.
+        /// </summary>
         public void Dispose()
         {
             // Завершаем все pending requests

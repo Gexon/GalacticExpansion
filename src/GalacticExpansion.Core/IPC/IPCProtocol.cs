@@ -40,6 +40,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class SpawnStructureRequest : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр запроса на спавн структуры.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public SpawnStructureRequest()
         {
             MessageType = "SpawnStructure";
@@ -88,6 +92,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class SpawnStructureResponse : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр ответа на запрос спавна структуры.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public SpawnStructureResponse()
         {
             MessageType = "SpawnStructureResponse";
@@ -124,6 +132,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class PlayfieldReadyRequest : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр запроса проверки готовности playfield.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public PlayfieldReadyRequest()
         {
             MessageType = "PlayfieldReady";
@@ -141,6 +153,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class PlayfieldReadyResponse : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр ответа о готовности playfield.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public PlayfieldReadyResponse()
         {
             MessageType = "PlayfieldReadyResponse";
@@ -171,6 +187,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class SpawnNPCRequest : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр запроса на спавн NPC.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public SpawnNPCRequest()
         {
             MessageType = "SpawnNPC";
@@ -213,6 +233,10 @@ namespace GalacticExpansion.Core.IPC
     /// </summary>
     public class SpawnNPCResponse : IPCMessage
     {
+        /// <summary>
+        /// Инициализирует новый экземпляр ответа на запрос спавна NPC.
+        /// Устанавливает тип сообщения для правильной десериализации.
+        /// </summary>
         public SpawnNPCResponse()
         {
             MessageType = "SpawnNPCResponse";

@@ -12,10 +12,34 @@ REM ============================================================================
 
 setlocal enabledelayedexpansion
 
-set "EMPYRION_ROOT=D:\SteamLibrary\steamapps\common\Empyrion - Galactic Survival"
-set "MOD_LOGS_DIR=%EMPYRION_ROOT%\Content\Mods\GalacticExpansion\Logs"
-set "SERVER_LOGS_DIR=%EMPYRION_ROOT%\Logs"
-set "PROJECT_LOGS_DIR=E:\for_game\Empyrion\GalacticExpansion\logs"
+REM Путь по умолчанию к игре (фаллбек)
+set "PROJECT_DIR=E:\for_game\Empyrion\GalacticExpansion"
+set "EMPYRION_ROOT=C:\Program Files (x86)\Steam\steamapps\common\Empyrion - Galactic Survival"
+set "CONFIG_FILE=%PROJECT_DIR%\config\Configuration.json"
+
+REM Попытка загрузить путь из конфигурации
+if exist "%CONFIG_FILE%" (
+    REM Ищем строку "EmpyrionPath" в JSON и извлекаем значение
+    for /f "usebackq tokens=* delims=" %%A in (`findstr /C:"EmpyrionPath" "%CONFIG_FILE%"`) do (
+        set "JSON_LINE=%%A"
+        REM Убираем всё до первых кавычек значения (после ":)
+        set "JSON_LINE=!JSON_LINE:*: "=!"
+        REM Убираем закрывающие кавычки и запятую
+        set "JSON_LINE=!JSON_LINE:",=!"
+        set "JSON_LINE=!JSON_LINE:"=!"
+        REM Заменяем \\ на \
+        set "JSON_LINE=!JSON_LINE:\\=\!"
+        REM Убираем пробелы в начале и конце
+        for /f "tokens=*" %%B in ("!JSON_LINE!") do set "TEMP_PATH=%%B"
+        if not "!TEMP_PATH!"=="" (
+            set "EMPYRION_ROOT=!TEMP_PATH!"
+        )
+    )
+)
+
+set "MOD_LOGS_DIR=!EMPYRION_ROOT!\Content\Mods\GalacticExpansion\Logs"
+set "SERVER_LOGS_DIR=!EMPYRION_ROOT!\Logs"
+set "PROJECT_LOGS_DIR=%PROJECT_DIR%\logs"
 
 echo.
 echo =========================================================================
@@ -27,13 +51,13 @@ REM ---------------------------------------------------------------------------
 REM Часть 1: Логи мода (основной источник)
 REM ---------------------------------------------------------------------------
 echo [1] Проверка логов мода...
-echo     Папка: %MOD_LOGS_DIR%
+echo     Папка: !MOD_LOGS_DIR!
 echo.
 
-if exist "%MOD_LOGS_DIR%" (
+if exist "!MOD_LOGS_DIR!" (
     REM Ищем последний лог-файл мода (с новым форматом: GLEX_2026-02-02_143025.log)
     set "MOD_LOG="
-    for /f "delims=" %%F in ('dir /b /o:-d "%MOD_LOGS_DIR%\GLEX_*.log" 2^>nul ^| findstr /v "errors"') do (
+    for /f "delims=" %%F in ('dir /b /o:-d "!MOD_LOGS_DIR!\GLEX_*.log" 2^>nul ^| findstr /v "errors"') do (
         set "MOD_LOG=%%F"
         goto :mod_found
     )
@@ -44,7 +68,7 @@ if exist "%MOD_LOGS_DIR%" (
     goto :check_server_logs
     
     :mod_found
-    set "MOD_LOG_PATH=%MOD_LOGS_DIR%\!MOD_LOG!"
+    set "MOD_LOG_PATH=!MOD_LOGS_DIR!\!MOD_LOG!"
     echo [OK] Найден лог мода: !MOD_LOG!
     echo     Путь: !MOD_LOG_PATH!
     echo.
@@ -58,7 +82,7 @@ if exist "%MOD_LOGS_DIR%" (
             
     goto :end
 ) else (
-    echo [!] Папка логов мода не существует: %MOD_LOGS_DIR%
+    echo [!] Папка логов мода не существует: !MOD_LOGS_DIR!
     echo     Логи будут создаться после первого запуска мода
     echo.
 )
@@ -68,11 +92,11 @@ REM Часть 2: Логи из Empyrion Dedicated Server (fallback)
 REM ---------------------------------------------------------------------------
 :check_server_logs
 echo [2] Проверка логов Empyrion Dedicated Server...
-echo     Папка: %SERVER_LOGS_DIR%
+echo     Папка: !SERVER_LOGS_DIR!
 echo.
 
-if not exist "%SERVER_LOGS_DIR%" (
-    echo [ОШИБКА] Папка логов сервера не найдена: %SERVER_LOGS_DIR%
+if not exist "!SERVER_LOGS_DIR!" (
+    echo [ОШИБКА] Папка логов сервера не найдена: !SERVER_LOGS_DIR!
     echo.
     echo Проверьте путь к Empyrion в скрипте
     echo.
@@ -80,7 +104,7 @@ if not exist "%SERVER_LOGS_DIR%" (
 )
 
 REM Ищем последний Dedicated лог-файл
-for /f "delims=" %%D in ('dir /b /s "%SERVER_LOGS_DIR%\Dedicated*.log" 2^>nul') do (
+for /f "delims=" %%D in ('dir /b /s "!SERVER_LOGS_DIR!\Dedicated*.log" 2^>nul') do (
     set "TEMP_LOG=%%D"
 )
 
@@ -94,8 +118,8 @@ if not defined TEMP_LOG (
 
 REM Находим самый свежий файл
 set "SERVER_LOG="
-for /f "delims=" %%F in ('dir /b /o:-d "%SERVER_LOGS_DIR%\*\Dedicated*.log" 2^>nul') do (
-    for /f "delims=" %%P in ('dir /b /s /o:-d "%SERVER_LOGS_DIR%\Dedicated*.log" 2^>nul') do (
+for /f "delims=" %%F in ('dir /b /o:-d "!SERVER_LOGS_DIR!\*\Dedicated*.log" 2^>nul') do (
+    for /f "delims=" %%P in ('dir /b /s /o:-d "!SERVER_LOGS_DIR!\Dedicated*.log" 2^>nul') do (
         set "SERVER_LOG=%%P"
         goto :server_found
     )
@@ -131,29 +155,29 @@ REM ---------------------------------------------------------------------------
 REM Часть 3: Копирование логов в папку проекта
 REM ---------------------------------------------------------------------------
 echo [3] Копирование логов в папку проекта...
-echo     Источник: %MOD_LOGS_DIR%
-echo     Назначение: %PROJECT_LOGS_DIR%
+echo     Источник: !MOD_LOGS_DIR!
+echo     Назначение: !PROJECT_LOGS_DIR!
 echo.
 
 REM Создаем папку logs в проекте, если не существует
-if not exist "%PROJECT_LOGS_DIR%" (
-    mkdir "%PROJECT_LOGS_DIR%"
+if not exist "!PROJECT_LOGS_DIR!" (
+    mkdir "!PROJECT_LOGS_DIR!"
     echo     [OK] Папка создана
 )
 
 REM Копируем файлы логов с перезаписью устаревших
-if exist "%MOD_LOGS_DIR%\*.log" (
+if exist "!MOD_LOGS_DIR!\*.log" (
     set "COPIED_COUNT=0"
     set "UPDATED_COUNT=0"
-    for %%F in ("%MOD_LOGS_DIR%\*.log") do (
+    for %%F in ("!MOD_LOGS_DIR!\*.log") do (
         set "NEED_COPY=0"
         
         REM Проверяем, существует ли файл в проекте
-        if not exist "%PROJECT_LOGS_DIR%\%%~nxF" (
+        if not exist "!PROJECT_LOGS_DIR!\%%~nxF" (
             set "NEED_COPY=1"
         ) else (
             REM Сравниваем даты модификации через PowerShell
-            for /f "usebackq" %%T in (`powershell -NoProfile -Command "if ((Get-Item '%%F').LastWriteTime -gt (Get-Item '%PROJECT_LOGS_DIR%\%%~nxF').LastWriteTime) { 'NEWER' } else { 'OLDER' }"`) do (
+            for /f "usebackq" %%T in (`powershell -NoProfile -Command "if ((Get-Item '%%F').LastWriteTime -gt (Get-Item '!PROJECT_LOGS_DIR!\%%~nxF').LastWriteTime) { 'NEWER' } else { 'OLDER' }"`) do (
                 if "%%T"=="NEWER" (
                     set "NEED_COPY=2"
                 )
@@ -162,7 +186,7 @@ if exist "%MOD_LOGS_DIR%\*.log" (
         
         REM Копируем, если нужно
         if !NEED_COPY! GTR 0 (
-            copy /Y "%%F" "%PROJECT_LOGS_DIR%\" >nul 2>&1
+            copy /Y "%%F" "!PROJECT_LOGS_DIR!\" >nul 2>&1
             if !ERRORLEVEL! EQU 0 (
                 if !NEED_COPY! EQU 1 (
                     set /a COPIED_COUNT+=1

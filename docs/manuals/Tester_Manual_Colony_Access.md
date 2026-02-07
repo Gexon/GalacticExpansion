@@ -27,7 +27,10 @@
 [Корень игры]\Content\Mods\GalacticExpansion\state.json
 ```
 
-Пример:  
+Пример (если игра установлена в Steam по умолчанию):  
+`C:\Program Files (x86)\Steam\steamapps\common\Empyrion - Galactic Survival\Content\Mods\GalacticExpansion\state.json`
+
+Или (если Steam на другом диске):
 `D:\SteamLibrary\steamapps\common\Empyrion - Galactic Survival\Content\Mods\GalacticExpansion\state.json`
 
 В файле найдите секцию `"Colonies"`. У каждой колонии есть `"Position"` с полями `"X"`, `"Y"`, `"Z"` (в метрах):
