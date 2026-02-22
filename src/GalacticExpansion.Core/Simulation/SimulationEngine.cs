@@ -247,11 +247,12 @@ namespace GalacticExpansion.Core.Simulation
                 // Обновляем все модули
                 _moduleRegistry.UpdateAllModules(context);
 
-                // Перезагрузка state после обновления модулей: колония может быть создана по Event_Playfield_Loaded вне тика;
-                // без перезагрузки _state в движке оставался бы старым и колония не обновлялась бы до перезапуска.
+                // In-memory _state — единственный источник правды во время работы симуляции.
+                // Все модули работают напрямую с объектами из _state.Colonies.
+                // Файл state.json используется только для персистентности (автосохранение каждые 60 сек и при shutdown).
                 lock (_stateLock)
                 {
-                    _state = _stateStore.LoadAsync().GetAwaiter().GetResult();
+                    _state.IsDirty = true;
                 }
 
                 // Публикуем событие тика

@@ -16,84 +16,76 @@
 
 ## Ключевые технические решения
 
-### Native Playfield Spawner Pattern (Phase 3.1 — НОВОЕ!)
+### In-Memory State Pattern (Phase 3.2 — КРИТИЧЕСКОЕ!)
 
-**Проблема:** PfServer крашится при инициализации из-за отсутствия ModGameAPI.
+**Принцип:** `SimulationEngine._state` — единственный источник правды во время работы симуляции. Файл `state.json` — только для персистентности между перезапусками.
 
-**Решение:** Прямой спавн через IPlayfield API без Gateway/ModGameAPI.
+**Правила:**
+1. **ЗАПРЕЩЕНО** вызывать `_stateStore.LoadAsync()` внутри тикового цикла
+2. Модули работают напрямую с объектами из `_state.Colonies`
+3. `_state.IsDirty = true` ставится каждый тик
+4. Автосохранение в файл каждые 60 сек + при shutdown
+5. `ColonyManager.SetSimulationState()` инжектит ссылку на in-memory state после старта SimulationEngine
 
-```csharp
-// НОВАЯ АРХИТЕКТУРА PfServer (без Gateway):
-OnPlayfieldLoaded → IPlayfield instance
-    ↓
-NativePlayfieldSpawner(pfInstance)
-    ↓
-IPlayfield.SpawnPrefab() / SpawnEntity() (СИНХРОННЫЙ!)
+**Поток данных:**
+```
+Запуск: LoadAsync() -> _state (in-memory)
+Тик: context.CurrentState = _state -> модули работают напрямую
+Game_Update: TryMaterializePendingColoniesAsync() -> in-memory state
+Автосохранение (60 сек): SaveAsync(_state) -> state.json
+Shutdown: SaveAsync(_state) -> state.json
 ```
 
-**Ключевые компоненты:**
+**Ошибка-предшественник:** SimulationEngine перезагружал state из файла каждый тик (`_stateStore.LoadAsync()`), уничтожая все in-memory изменения VirtualResources.
 
-1. **NativePlayfieldSpawner:**
-   - Принимает `IPlayfield` напрямую (не через wrapper)
-   - Синхронные вызовы (нет async overhead)
-   - Не требует Gateway/SequenceManager/ModGameAPI
-   - `SpawnStructureAsync()` → `IPlayfield.SpawnPrefab(prefabName, position)`
-   - `SpawnNPCAsync()` → `IPlayfield.SpawnEntity(entityType, position, rotation)`
-   - `GetTerrainHeight()` → `IPlayfield.GetTerrainHeightAt(x, z)`
+### Logistics Ship Resources Pattern (Phase 3.2)
 
-2. **UnityTypeConverter:**
-   - Конвертация между `Models.Vector3` и `UnityEngine.Vector3`
-   - Конвертация Euler angles в `UnityEngine.Quaternion`
-   - **ВАЖНО:** `using ILogger = NLog.ILogger;` (избежать конфликта с UnityEngine.ILogger)
+**Принцип:** Логистический корабль доставляет начальные ресурсы при создании колонии. Ресурсов достаточно для ConstructionYard + BaseL1. Самостоятельное накопление через ProductionRate — только с BaseL2.
 
-3. **InitializePlayfieldServer() - упрощенная:**
-   - ❌ НЕ создает Gateway
-   - ❌ НЕ создает EntitySpawner/PlacementResolver/Container
-   - ❌ НЕ извлекает ModGameAPI
-   - ✅ Только NetworkBridge + NativePlayfieldSpawner в OnPlayfieldLoaded
+**Формула:** `initialResources = (ConstructionYard.RequiredResources + BaseL1.RequiredResources) * 1.1`
 
-**Преимущества:**
-- ✅ Нет краша при отсутствии ModGameAPI
-- ✅ Быстрее (~50-100ms vs 500ms-2s)
-- ✅ Проще (меньше слоев)
-- ✅ Надежнее (прямой доступ к IPlayfield)
+С текущим конфигом: `(0 + 1000) * 1.1 = 1100 VirtualResources`
 
-### State Sync Pattern
-- Изменения колонии в критичных методах делаются через объект из `StateStore.LoadAsync`.
-- После обновления — обязательное `SaveAsync`.
+### Native Playfield Spawner Pattern (Phase 3.1)
+
+**Проблема:** PfServer крашится при инициализации из-за отсутствия ModGameAPI.
+**Решение:** Прямой спавн через IPlayfield API без Gateway/ModGameAPI.
+
+```
+OnPlayfieldLoaded → IPlayfield instance
+    → NativePlayfieldSpawner(pfInstance)
+    → IPlayfield.SpawnPrefab() / SpawnEntity() (СИНХРОННЫЙ!)
+```
 
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
 - Тесты проверяют соответствие контрактам.
 
 ### Event_Error Handling (ModAPI)
-- При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo` (поле `errorType` — enum `ErrorType`).
-- Шлюз в `HandleEvent` обрабатывает Event_Error: извлекает текст из `ErrorInfo`, вызывает `SequenceManager.CompleteWithError(seqNr, exception)`.
+- При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo`.
+- Шлюз обрабатывает Event_Error: вызывает `SequenceManager.CompleteWithError(seqNr, exception)`.
 
 ### Playfield Load Handling & Colony Virtualization (Phase 3)
 
-**Виртуализация колоний** — ключевой паттерн для надёжного создания и развития колоний:
-
 1. **Создание виртуальной колонии** (при старте мода):
-   - Не зависит от событий — создаётся сразу в `ColonyTickModule.InitializeAsync`
-   - `IsVirtual = true`, без физических структур
-   - Развивается в БД: ресурсы, юниты, переходы стадий
+   - `ColonyTickModule.InitializeAsync` → `CreateColonyAsync` → `InitializeColonyAsync`
+   - `IsVirtual = true`, начальные ресурсы = 1100
+   - Развивается в памяти: ресурсы, юниты, переходы стадий
 
 2. **Материализация** (через IPC из Dedi в PfServer):
-   - Событие `Event_Playfield_Loaded` → пометка `PendingMaterialization = true`
-   - Dedi: `ColonyManager.TryMaterializePendingColoniesAsync()` → IPC команда
-   - PfServer: `HandleIPCRequestWithNativeSpawner()` → `NativePlayfieldSpawner.SpawnStructureAsync()`
-   - При успехе: `IsVirtual = false`, EntityId сохраняется
-
-**Данные события:** `PlayfieldLoad` (Mif/Eleon.Modding) — поля `sec`, `playfield`, `processId`
+   - `Event_Playfield_Loaded` → `EnsurePlayfieldColoniesSpawnedAsync` → `PendingMaterialization = true`
+   - `Game_Update` → `TryMaterializePendingColoniesAsync()` → проверка готовности → IPC
+   - PfServer: `HandleIPCRequestWithNativeSpawner()` → `NativePlayfieldSpawner`
 
 ## Важные инварианты
 
-1. `State.json` всегда валиден (атомарная запись + бэкапы).
-2. `SeqNr` уникальны и корректно сопоставляются.
-3. Rate limiting обязателен для ModAPI запросов (только Dedi).
-4. Спавн в Dedi через `IEntitySpawner` (IPCEntitySpawner).
-5. Спавн в PfServer через `NativePlayfieldSpawner` (прямой IPlayfield API).
-6. **Виртуальные колонии:** физические операции запрещены; только обновление в БД.
-7. **Multi-process:** Spawn работает только из PfServer процесса.
-8. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
+1. **In-memory state — единственный источник правды** во время работы симуляции.
+2. **Файл state.json** — только для персистентности (автосохранение 60 сек + shutdown).
+3. **ЗАПРЕЩЕНО** `_stateStore.LoadAsync()` внутри тикового цикла.
+4. `SeqNr` уникальны и корректно сопоставляются.
+5. Rate limiting обязателен для ModAPI запросов (только Dedi).
+6. Спавн в Dedi через `IEntitySpawner` (IPCEntitySpawner).
+7. Спавн в PfServer через `NativePlayfieldSpawner` (прямой IPlayfield API).
+8. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
+9. **Multi-process:** Spawn работает только из PfServer процесса.
+10. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`

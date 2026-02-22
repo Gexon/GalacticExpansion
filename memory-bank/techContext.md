@@ -27,12 +27,13 @@
 
 - `src/GalacticExpansion.Core` — модули
   - `IPC/` - IPC протокол и NetworkBridge
-  - `Spawning/` - EntitySpawner, IPCEntitySpawner, **NativePlayfieldSpawner**, StageManager
+  - `Spawning/` - EntitySpawner, IPCEntitySpawner, NativePlayfieldSpawner, StageManager
   - `Simulation/` - SimulationEngine, ColonyManager, модули
+  - `Economy/` - EconomySimulator, UnitEconomyManager
   - `Gateway/` - EmpyrionGateway для ModAPI
 - `src/GalacticExpansion.Models` — модели данных
 - `src/GalacticExpansion` — entry point (ModMain)
-- `lib/` - Empyrion DLLs: ModApi.dll, Mif.dll, **UnityEngine.CoreModule.dll**
+- `lib/` - Empyrion DLLs
 
 ## Локальная разработка
 
@@ -45,78 +46,48 @@
 - NLog, путь к конфигу задается явно в `ModMain`
 - **Префиксы процессов**: `[Dedi-PID]` / `[PfServer-PID]` / `[PfServer-Native]`
 - Layout: `${longdate}|${level}|${logger}|${gdc:item=process}|${message}`
-- Критично для отладки multi-process проблем
 
-## Multi-Process Architecture (Phase 3.1 — ОБНОВЛЕНО!)
+## State Management (Phase 3.2 — ОБНОВЛЕНО!)
 
-### Ключевые компоненты:
+### Принцип: In-memory state = единственный источник правды
 
-**1. Native Playfield Spawner** (НОВОЕ! - Phase 3.1):
-- **Файлы:**
-  - `INativePlayfieldSpawner.cs` - интерфейс
-  - `NativePlayfieldSpawner.cs` - реализация
-  - `UnityTypeConverter.cs` - конвертация типов
-- **Назначение:** Прямой спавн через IPlayfield API без ModGameAPI
-- **Использование:** Только в PfServer процессе
-- **API:**
-  - `SpawnStructureAsync()` → `IPlayfield.SpawnPrefab()`
-  - `SpawnNPCAsync()` → `IPlayfield.SpawnEntity()`
-  - `GetTerrainHeight()` → `IPlayfield.GetTerrainHeightAt()`
-- **Преимущества:**
-  - НЕ требует ModGameAPI (решает краш PfServer!)
-  - Синхронные вызовы (быстрее: ~50-100ms)
-  - Прямой доступ к playfield entities
-  - Простая архитектура
+- `SimulationEngine._state` — канонический объект SimulationState
+- `_stateStore.LoadAsync()` — **ТОЛЬКО при запуске** (StartAsync)
+- `_stateStore.SaveAsync()` — автосохранение каждые 60 сек + при shutdown
+- **ЗАПРЕЩЕНО** LoadAsync внутри тикового цикла!
 
-**2. IPCProtocol** (`GalacticExpansion.Core/IPC/IPCProtocol.cs`):
-- `IPCMessage` - базовый класс
-- `SpawnStructureRequest/Response`, `SpawnNPCRequest/Response`
-- JSON сериализация
+### ColonyManager.SetSimulationState()
+- Инжектирует ссылку на in-memory state из SimulationEngine
+- Вызывается из ModMain после `_simulationEngine.StartAsync()`
+- До вызова — fallback на `_stateStore.LoadAsync()` (только при инициализации)
 
-**3. NetworkBridge** (`GalacticExpansion.Core/IPC/NetworkBridge.cs`):
-- `InitializeForDedi()` / `InitializeForPlayfieldServer(pfName)`
-- `SendRequestToPlayfieldAsync<T>()` - отправка с таймаутом
-- Tracking через `ConcurrentDictionary<Guid, TaskCompletionSource>`
+### Конфигурация стадий (из ConfigurationLoader, defaults)
+```
+ConstructionYard: RequiredResources=0, ProductionRate=100, MinTime=600s
+BaseL1: RequiredResources=1000, ProductionRate=150, MinTime=1800s
+BaseL2: RequiredResources=3000, ProductionRate=200, MinTime=3600s
+BaseL3: RequiredResources=6000, ProductionRate=250, MinTime=7200s
+BaseMax: RequiredResources=10000, ProductionRate=300, MinTime=14400s
+```
 
-**4. IPCEntitySpawner** (`GalacticExpansion.Core/Spawning/IPCEntitySpawner.cs`):
-- Wrapper вокруг EntitySpawner
-- Автоматическая маршрутизация по `_processMode`
-- Dedi → IPC, PfServer → direct spawn
+## Multi-Process Architecture
 
-### Критические правила:
+### Dedi процесс:
+```
+NetworkBridge → IPCEntitySpawner → StageManager → ColonyManager → модули
+SimulationEngine (тики) → ColonyTickModule → UpdateColonyAsync
+Game_Update → TryMaterializePendingColoniesAsync
+```
 
-1. **Порядок инициализации в Dedi:**
-   ```
-   NetworkBridge → IPCEntitySpawner → StageManager → ColonyManager → модули
-   ```
-
-2. **PfServer инициализация (НОВОЕ!):**
-   ```
-   OnPlayfieldLoaded → IPlayfield instance
-       ↓
-   NativePlayfieldSpawner(pfInstance)
-       ↓
-   NetworkBridge.InitializeForPlayfieldServer()
-       ↓
-   OnRequestReceived → HandleIPCRequestWithNativeSpawner
-   ```
-   - НЕ создает Gateway/EntitySpawner
-   - Только NetworkBridge + NativePlayfieldSpawner
-
-3. **UnityEngine.ILogger конфликт:**
-   ```csharp
-   using ILogger = NLog.ILogger; // ОБЯЗАТЕЛЬНО при using UnityEngine!
-   ```
-
-4. **Зависимости проектов:**
-   - `GalacticExpansion.Core.csproj` → UnityEngine.CoreModule.dll
-   - `GalacticExpansion.csproj` → UnityEngine.CoreModule.dll
+### PfServer процесс:
+```
+OnPlayfieldLoaded → IPlayfield → NativePlayfieldSpawner
+NetworkBridge → HandleIPCRequestWithNativeSpawner
+```
 
 ## Известные нюансы
 
-- В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`.
+- В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`
 - **UnityEngine.ILogger vs NLog.ILogger:** Добавлять alias при using UnityEngine
-- **IPlayfield API:** Синхронные методы (не Task-based)
 - Дефолтные префабы колоний — ванильные (BA_ConstructionSite, BA_Zirax_*)
 - **IPC таймауты**: 15s структуры, 10s NPC
-- **JSON vs Binary**: JSON для отладки (можно ProtoBuf для оптимизации)

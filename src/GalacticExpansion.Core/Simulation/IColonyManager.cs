@@ -38,8 +38,16 @@ namespace GalacticExpansion.Core.Simulation
 
         /// <summary>
         /// Пытается материализовать колонии, помеченные для материализации (retry-логика).
-        /// Вызывается каждый тик. При ошибке PlayfieldConnectionNotFound повторяет попытки до 10 раз.
+        /// Вызывается каждый Game_Update. При ошибке повторяет попытки до 30 раз.
         /// </summary>
         Task TryMaterializePendingColoniesAsync();
+
+        /// <summary>
+        /// Устанавливает ссылку на in-memory SimulationState из SimulationEngine.
+        /// Вызывается после старта SimulationEngine, чтобы ColonyManager работал с тем же state,
+        /// что и тиковый цикл (без обращения к файлу state.json).
+        /// </summary>
+        /// <param name="state">In-memory SimulationState из SimulationEngine.</param>
+        void SetSimulationState(SimulationState state);
     }
 }

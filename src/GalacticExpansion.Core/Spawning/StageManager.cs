@@ -193,38 +193,9 @@ namespace GalacticExpansion.Core.Spawning
                     }
                 }
 
-                // 9. Сохранение state
-                // КРИТИЧНО: Загружаем актуальный state и синхронизируем ВСЕ изменения
-                var state = await _stateStore.LoadAsync();
-                var colonyInState = state.Colonies.FirstOrDefault(c => c.Id == colony.Id);
-                
-                if (colonyInState == null)
-                {
-                    _logger.Error($"Colony {colony.Id} not found in state after transition! This should not happen.");
-                    throw new InvalidOperationException($"Colony {colony.Id} disappeared from state during transition");
-                }
-
-                // Синхронизируем критичные изменения из colony в colonyInState
-                colonyInState.Stage = colony.Stage;
-                colonyInState.MainStructureId = colony.MainStructureId;
-                colonyInState.LastUpgradeTime = colony.LastUpgradeTime;
-                
-                // Resources - обновляем после ConsumeResourcesForUpgrade
-                colonyInState.Resources.VirtualResources = colony.Resources.VirtualResources;
-                colonyInState.Resources.ProductionRate = colony.Resources.ProductionRate;
-                colonyInState.Resources.ProductionBonus = colony.Resources.ProductionBonus;
-                
-                // UnitPool - обновляем MaxGuards после RecalculateCapacity
-                colonyInState.UnitPool.MaxGuards = colony.UnitPool.MaxGuards;
-                colonyInState.UnitPool.MaxPatrolVessels = colony.UnitPool.MaxPatrolVessels;
-                colonyInState.UnitPool.MaxWarships = colony.UnitPool.MaxWarships;
-                colonyInState.UnitPool.MaxDrones = colony.UnitPool.MaxDrones;
-                
-                // ActiveUnits - синхронизируем список активных юнитов после RegisterActiveUnit
-                colonyInState.UnitPool.ActiveUnits.Clear();
-                colonyInState.UnitPool.ActiveUnits.AddRange(colony.UnitPool.ActiveUnits);
-                
-                await _stateStore.SaveAsync(state);
+                // 9. Сохранение: colony — уже объект из in-memory state (SimulationEngine._state.Colonies).
+                // Все изменения (Stage, Resources, UnitPool) применены напрямую к нему.
+                // Персистентность обеспечивается автосохранением SimulationEngine каждые 60 сек и при shutdown.
 
                 // 10. Публикация события
                 // Публикуем событие с правильной фиксацией "откуда → куда",
@@ -263,26 +234,10 @@ namespace GalacticExpansion.Core.Spawning
 
             _logger.Warn($"Colony {colony.Id}: Downgrading from {colony.Stage} to {previousStage.Value}");
 
-            // КРИТИЧНО: Загружаем state СНАЧАЛА, затем изменяем объект ИЗ state
-            var state = await _stateStore.LoadAsync();
-            var colonyInState = state.Colonies.FirstOrDefault(c => c.Id == colony.Id);
-            
-            if (colonyInState == null)
-            {
-                _logger.Error($"Colony {colony.Id} not found in state! Cannot downgrade.");
-                return;
-            }
-
-            // Обновляем данные колонии В state (не в параметре!)
-            colonyInState.Stage = previousStage.Value;
-            colonyInState.MainStructureId = null;
-
-            // Синхронизируем параметр colony с изменениями (для возврата вызывающему коду)
-            colony.Stage = colonyInState.Stage;
-            colony.MainStructureId = colonyInState.MainStructureId;
-
-            // Сохраняем изменения
-            await _stateStore.SaveAsync(state);
+            // colony — уже объект из in-memory state. Обновляем напрямую.
+            // Персистентность обеспечивается автосохранением SimulationEngine.
+            colony.Stage = previousStage.Value;
+            colony.MainStructureId = null;
         }
 
         /// <summary>
@@ -324,6 +279,21 @@ namespace GalacticExpansion.Core.Spawning
                 Stage = ColonyStage.LandingPending,
                 CreatedAt = DateTime.UtcNow
             };
+
+            // Логистический корабль доставляет начальные ресурсы при создании колонии.
+            // Ресурсов должно хватать на ConstructionYard + BaseL1 (с 10% запасом).
+            // Самостоятельное накопление через ProductionRate начинается только с BaseL2.
+            var constructionYardConfig = _config.Zirax?.Stages?.FirstOrDefault(s => s.Stage == "ConstructionYard");
+            var baseL1Config = _config.Zirax?.Stages?.FirstOrDefault(s => s.Stage == "BaseL1");
+
+            float initialResources = (constructionYardConfig?.RequiredResources ?? 0)
+                                   + (baseL1Config?.RequiredResources ?? 1000);
+            initialResources *= 1.1f;
+
+            colony.Resources.VirtualResources = initialResources;
+            colony.Resources.ProductionRate = constructionYardConfig?.ProductionRate ?? 100;
+
+            _logger.Info($"Colony {colony.Id}: logistics ship delivered {initialResources:F0} resources (enough for ConstructionYard + BaseL1)");
 
             // Спавн структуры ТОЛЬКО для материализованных колоний
             if (!isVirtual)

@@ -236,10 +236,10 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             // Act
             await _colonyManager.RemoveColonyAsync("colony-to-remove");
 
-            // Assert
+            // Assert: колония удалена из in-memory state.
+            // SaveAsync не вызывается — персистентность обеспечивается автосохранением SimulationEngine.
             Assert.Single(state.Colonies);
             Assert.Equal("colony-2", state.Colonies[0].Id);
-            _stateStoreMock.Verify(s => s.SaveAsync(state), Times.Once);
         }
 
         [Fact(DisplayName = "RemoveColony - логирует предупреждение если колония не найдена")]

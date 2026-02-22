@@ -197,6 +197,13 @@ namespace GalacticExpansion
                                 _currentState = _simulationEngine.State;
                                 _lastBackupTime = DateTime.UtcNow;
                                 _simulationStarted = true;
+
+                                // Передаём in-memory state в ColonyManager, чтобы он работал
+                                // напрямую с тем же state, что и SimulationEngine (без чтения файла)
+                                if (_colonyManager != null && _currentState != null)
+                                {
+                                    _colonyManager.SetSimulationState(_currentState);
+                                }
                                 
                                 _logger?.Info("========================================");
                                 _logger?.Info("[Dedi] GLEX simulation started successfully!");
@@ -241,10 +248,20 @@ namespace GalacticExpansion
                 {
                     // ==== DEDI ПРОЦЕСС ====
                     
-                    // ВАЖНО: Материализация виртуальных колоний теперь происходит через IPC!
-                    // ColonyManager → StageManager → IPCEntitySpawner → NetworkBridge → PfServer
-                    // Вызов идет из ColonyTickModule в SimulationEngine (событие Event_Playfield_Loaded)
-                    // Здесь НЕ нужно вызывать TryMaterializePendingColoniesAsync т.к. это происходит автоматически!
+                    // Материализация виртуальных колоний (retry-логика с проверкой готовности playfield).
+                    // EnsurePlayfieldColoniesSpawnedAsync помечает колонии (PendingMaterialization=true),
+                    // а TryMaterializePendingColoniesAsync выполняет фактический спавн через IPC.
+                    if (_colonyManager != null)
+                    {
+                        try
+                        {
+                            _colonyManager.TryMaterializePendingColoniesAsync().GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Debug($"[Dedi] Materialization check: {ex.Message}");
+                        }
+                    }
                     
                     // Периодические бэкапы (только в Dedi)
                     if (_config != null && _stateStore != null)

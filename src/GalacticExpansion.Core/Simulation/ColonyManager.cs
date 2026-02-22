@@ -14,6 +14,10 @@ namespace GalacticExpansion.Core.Simulation
     /// <summary>
     /// Реализация менеджера колоний.
     /// Координирует все аспекты управления колонией для упрощения Core Loop.
+    /// 
+    /// ВАЖНО: после старта SimulationEngine вызывается SetSimulationState(),
+    /// и ColonyManager работает с in-memory state напрямую (без чтения файла).
+    /// _stateStore используется только при начальной инициализации (CreateColonyAsync до старта симуляции).
     /// </summary>
     public class ColonyManager : IColonyManager
     {
@@ -24,15 +28,13 @@ namespace GalacticExpansion.Core.Simulation
         private readonly IStateStore _stateStore;
         private readonly ILogger _logger;
 
+        // Ссылка на in-memory SimulationState из SimulationEngine.
+        // До вызова SetSimulationState() == null, и методы используют _stateStore как fallback.
+        private SimulationState? _simulationState;
+
         /// <summary>
         /// Создаёт менеджер колоний с зависимостями: gateway, стадии, экономика, юнит-экономика, хранилище, логгер.
         /// </summary>
-        /// <param name="gateway">Gateway для взаимодействия с игрой (проверка готовности плейфилда).</param>
-        /// <param name="stageManager">Менеджер стадий колоний.</param>
-        /// <param name="economySimulator">Симулятор экономики.</param>
-        /// <param name="unitEconomy">Менеджер юнит-экономики.</param>
-        /// <param name="stateStore">Хранилище состояния.</param>
-        /// <param name="logger">Логгер.</param>
         public ColonyManager(
             IEmpyrionGateway gateway,
             IStageManager stageManager,
@@ -47,6 +49,24 @@ namespace GalacticExpansion.Core.Simulation
             _unitEconomy = unitEconomy ?? throw new ArgumentNullException(nameof(unitEconomy));
             _stateStore = stateStore ?? throw new ArgumentNullException(nameof(stateStore));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <inheritdoc/>
+        public void SetSimulationState(SimulationState state)
+        {
+            _simulationState = state ?? throw new ArgumentNullException(nameof(state));
+            _logger.Info($"ColonyManager: SimulationState injected ({state.Colonies.Count} colonies in-memory)");
+        }
+
+        /// <summary>
+        /// Возвращает in-memory state (если доступен) или загружает из файла (fallback при инициализации).
+        /// </summary>
+        private async Task<SimulationState> GetStateAsync()
+        {
+            if (_simulationState != null)
+                return _simulationState;
+
+            return await _stateStore.LoadAsync();
         }
 
         /// <summary>
@@ -101,10 +121,17 @@ namespace GalacticExpansion.Core.Simulation
 
             var colony = await _stageManager.InitializeColonyAsync(playfield, position, factionId, isVirtual);
 
-            // Добавление в state
-            var state = await _stateStore.LoadAsync();
+            // Добавление колонии в state (in-memory или файл при инициализации)
+            var state = await GetStateAsync();
             state.Colonies.Add(colony);
-            await _stateStore.SaveAsync(state);
+
+            // При начальной инициализации (_simulationState == null) сохраняем в файл,
+            // чтобы SimulationEngine.StartAsync() мог загрузить state с колонией.
+            // После старта симуляции сохранение через автосохранение SimulationEngine.
+            if (_simulationState == null)
+            {
+                await _stateStore.SaveAsync(state);
+            }
 
             return colony;
         }
@@ -128,7 +155,8 @@ namespace GalacticExpansion.Core.Simulation
             if (string.IsNullOrWhiteSpace(playfield))
                 return;
 
-            var state = await _stateStore.LoadAsync();
+            // Работаем с in-memory state -- изменения PendingMaterialization будут видны в Game_Update
+            var state = await GetStateAsync();
             var coloniesOnPlayfield = state.Colonies
                 .Where(c => string.Equals(c.Playfield, playfield, StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -140,17 +168,14 @@ namespace GalacticExpansion.Core.Simulation
             
             foreach (var colony in coloniesOnPlayfield)
             {
-                // Если колония виртуальная - помечаем для материализации
-                // Проверка готовности плейфилда будет в TryMaterializePendingColoniesAsync
                 if (colony.IsVirtual && !colony.PendingMaterialization)
                 {
                     colony.PendingMaterialization = true;
-                    colony.MaterializationAttempts = 0; // Начинаем с 0, проверка готовности в retry-логике
+                    colony.MaterializationAttempts = 0;
                     _logger.Info($"Virtual colony {colony.Id} marked for materialization (playfield readiness will be checked)");
                 }
                 else if (!colony.IsVirtual)
                 {
-                    // Если уже материализована - защищаем структуры
                     try
                     {
                         await _stageManager.MaintainColonyStructuresAsync(colony);
@@ -161,31 +186,18 @@ namespace GalacticExpansion.Core.Simulation
                     }
                 }
             }
-            
-            // Сохраняем изменения (PendingMaterialization флаги обновлены)
-            await _stateStore.SaveAsync(state);
         }
 
         /// <summary>
         /// Пытается материализовать колонии, помеченные для материализации (retry-логика с проверкой готовности).
-        /// Вызывается каждый тик из ColonyTickModule.
+        /// Вызывается из Game_Update() в Dedi процессе.
         /// 
-        /// Алгоритм:
-        /// 1. Проверка готовности плейфилда: делаем лёгкий запрос Request_Playfield_Stats
-        /// 2. Если плейфилд не готов: задержка 3 секунды, повтор в следующем тике
-        /// 3. Если плейфилд готов: попытка материализации через MaterializeColonyAsync
-        /// 4. При успехе: сбрасываем флаги (PendingMaterialization = false, MaterializationAttempts = 0)
-        /// 5. При ошибке: инкрементируем счетчик попыток, повтор в следующем тике (макс. 30 попыток = ~90 секунд)
-        /// 
-        /// AI-контекст: Event_Playfield_Loaded срабатывает когда плейфилд начинает загружаться,
-        /// но ещё не готов для операций спавна (PlayfieldConnectionNotFound). Активная проверка
-        /// готовности через Request_Playfield_Stats решает эту проблему надёжнее чем фиксированная задержка.
-        /// 
-        /// ВАЖНО: Этот метод ДОЛЖЕН вызываться из Game_Update() в PfServer процессе!
+        /// Работает с in-memory state -- изменения видны сразу без сохранения в файл.
+        /// Персистентность обеспечивается автосохранением SimulationEngine каждые 60 сек.
         /// </summary>
         public async Task TryMaterializePendingColoniesAsync()
         {
-            var state = await _stateStore.LoadAsync();
+            var state = await GetStateAsync();
             var pendingColonies = state.Colonies
                 .Where(c => c.IsVirtual && c.PendingMaterialization)
                 .ToList();
@@ -195,61 +207,43 @@ namespace GalacticExpansion.Core.Simulation
 
             _logger.Debug($"TryMaterializePendingColonies: {pendingColonies.Count} colony(ies) pending materialization");
 
-            bool stateChanged = false;
-
             foreach (var colony in pendingColonies)
             {
-                const int maxAttempts = 30; // Максимум 30 попыток по 3 секунды = 90 секунд
+                const int maxAttempts = 30;
 
-                // Превышено максимум попыток
                 if (colony.MaterializationAttempts >= maxAttempts)
                 {
                     _logger.Warn($"Colony {colony.Id} failed to materialize after {maxAttempts} attempts (~90 seconds). Giving up.");
                     colony.PendingMaterialization = false;
-                    stateChanged = true;
                     continue;
                 }
 
                 colony.MaterializationAttempts++;
 
-                // Проверяем готовность плейфилда перед материализацией
                 _logger.Debug($"Checking playfield '{colony.Playfield}' readiness for colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
                 
                 bool isReady = await IsPlayfieldReadyAsync(colony.Playfield);
                 
                 if (!isReady)
                 {
-                    _logger.Debug($"Playfield '{colony.Playfield}' not ready yet for colony {colony.Id}, waiting 3s...");
-                    stateChanged = true;
-                    await Task.Delay(3000); // Задержка 3 секунды перед следующей проверкой
+                    _logger.Debug($"Playfield '{colony.Playfield}' not ready yet for colony {colony.Id}");
                     continue;
                 }
 
-                // Плейфилд готов - пробуем материализацию
                 try
                 {
-                    _logger.Debug($"Playfield '{colony.Playfield}' is READY. Attempting to materialize colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
+                    _logger.Info($"Playfield '{colony.Playfield}' is READY. Materializing colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
                     await _stageManager.MaterializeColonyAsync(colony);
                     
-                    // Успех!
                     colony.PendingMaterialization = false;
                     colony.MaterializationAttempts = 0;
-                    stateChanged = true;
                     
-                    _logger.Info($"✅ Colony {colony.Id} materialized successfully on attempt {colony.MaterializationAttempts}");
+                    _logger.Info($"✅ Colony {colony.Id} materialized successfully");
                 }
                 catch (Exception ex)
                 {
-                    // Ошибка - попробуем в следующий тик
                     _logger.Debug($"Materialization attempt {colony.MaterializationAttempts} failed for colony {colony.Id}: {ex.Message}");
-                    stateChanged = true; // Обновляем счетчик попыток
-                    await Task.Delay(3000); // Задержка 3 секунды перед следующей попыткой
                 }
-            }
-
-            if (stateChanged)
-            {
-                await _stateStore.SaveAsync(state);
             }
         }
 
@@ -287,21 +281,17 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Удаляет колонию из системы
+        /// Удаляет колонию из in-memory state.
+        /// Персистентность обеспечивается автосохранением SimulationEngine.
         /// </summary>
         public async Task RemoveColonyAsync(string colonyId)
         {
-            var state = await _stateStore.LoadAsync();
+            var state = await GetStateAsync();
             var colony = state.Colonies.FirstOrDefault(c => c.Id == colonyId);
 
             if (colony != null)
             {
-                // Удаляем колонию из списка
                 state.Colonies.Remove(colony);
-                
-                // Сохраняем измененный state (не загружаем заново!)
-                await _stateStore.SaveAsync(state);
-
                 _logger.Info($"Colony {colonyId} removed from state");
             }
             else

@@ -2,77 +2,43 @@
 
 ## Текущий статус
 
-**Дата обновления:** 07.02.2026  
-**Phase 3.1 (Native Spawner):** ✅ РЕАЛИЗОВАНО (требует тестирование)  
+**Дата обновления:** 22.02.2026  
+**Phase 3.2 (Fix colony spawn):** ✅ РЕАЛИЗОВАНО  
 **Phase 4 (Combat):** не начата
 
 ## Недавний прогресс
 
-### 🎯 Native Playfield Spawner — КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ ✅
+### Phase 3.2 — Исправление спавна базы колонии ✅
 
-**Задача:** Исправить краш PfServer при входе игрока в игровое поле.
+**Задача:** Исправить 3 критических бага, блокирующих спавн базы.
 
-**Проблема (из логов 06.02.2026):**
-```
-[PfServer] CRITICAL ERROR during PfServer initialization
-System.InvalidOperationException: Gateway required for PfServer
-  at ModMain.InitializePlayfieldServer (line 1073)
-```
+**Баг 1: Ресурсы уничтожались каждый тик**
+- `SimulationEngine.OnSimulationTick()` перезагружал state из файла после каждого тика
+- `resources before=0` на каждом из 120+ тиков при rate=100
+- **Исправление:** убрана перезагрузка, заменена на `_state.IsDirty = true`
 
-**Корневая причина:**
-- PfServer процесс не получает ModGameAPI (Game_Start может не вызваться)
-- Старая архитектура требовала Gateway для spawn
-- Gateway требует ModGameAPI для инициализации
-- Результат: краш PfServer → API сервер падает при входе игрока
+**Баг 2: Начальные ресурсы не выдавались**
+- По FR-004 логистический корабль доставляет ресурсы
+- Колония создавалась с `VirtualResources = 0`
+- **Исправление:** при создании выдаётся 1100 ресурсов (ConstructionYard + BaseL1 + 10%)
 
-**Решение - Native Playfield Spawner:**
+**Баг 3: TryMaterializePendingColoniesAsync нигде не вызывался**
+- Комментарии в коде противоречили друг другу
+- **Исправление:** добавлен вызов в `ModMain.Game_Update()` секции Dedi
 
-**1. NativePlayfieldSpawner** (`Core/Spawning/NativePlayfieldSpawner.cs`):
-- Новый spawner с прямым доступом к IPlayfield API
-- НЕ требует ModGameAPI/Gateway/SequenceManager
-- Синхронные вызовы: `SpawnPrefab()`, `SpawnEntity()`, `GetTerrainHeightAt()`
-- Работает только в PfServer процессе
-- Интерфейс: `INativePlayfieldSpawner.cs`
+**Дополнительные улучшения:**
+- Убраны все избыточные `_stateStore.LoadAsync()` из тиковых методов
+- `ColonyManager` получил `SetSimulationState()` для работы с in-memory state
+- StageManager: убран антипаттерн LoadAsync + ручное копирование полей
+- Тесты обновлены: 175/175 проходят
 
-**2. UnityTypeConverter** (`Core/Spawning/UnityTypeConverter.cs`):
-- Конвертация `Models.Vector3` ↔ `UnityEngine.Vector3`
-- Конвертация Euler angles ↔ `UnityEngine.Quaternion`
-- Алиас `using ILogger = NLog.ILogger;` для избежания конфликта
-
-**3. InitializePlayfieldServer() - переписана:**
-- Убрана инициализация Gateway/EntitySpawner/PlacementResolver/Container
-- Создается только NetworkBridge
-- В OnPlayfieldLoaded: создается NativePlayfieldSpawner с IPlayfield instance
-- Регистрируется HandleIPCRequestWithNativeSpawner
-
-**4. HandleIPCRequestWithNativeSpawner():**
-- Новый обработчик IPC с нативным спавнером
-- Конвертация типов через UnityTypeConverter
-- Прямой вызов `IPlayfield.SpawnPrefab()` / `SpawnEntity()`
-- Логи с префиксом `[PfServer-Native]`
-
-**5. Зависимости:**
-- Скопирован `UnityEngine.CoreModule.dll` в `lib/`
-- Добавлена ссылка в `GalacticExpansion.Core.csproj`
-- Добавлена ссылка в `GalacticExpansion.csproj`
-
-**Результат:**
-- ✅ PfServer инициализируется БЕЗ Gateway (нет краша!)
-- ✅ Spawn работает через IPlayfield.SpawnPrefab() (прямой вызов)
-- ✅ Быстрее: ~50-100ms (вместо 500ms-2s через Gateway+IPC)
-- ✅ Проще: меньше слоев, меньше точек отказа
-- ✅ Надежнее: прямой доступ к IPlayfield entities
-
-**Архитектура:**
-```
-DEDI: ColonyManager → IPCEntitySpawner → NetworkBridge
-  ↓ IPC
-PFSERVER: NetworkBridge → HandleIPCRequestWithNativeSpawner
-  ↓
-NativePlayfieldSpawner → IPlayfield.SpawnPrefab()
-  ↓
-✅ Entity spawned!
-```
+**Изменённые файлы:**
+- `SimulationEngine.cs` — убрана перезагрузка state из файла каждый тик
+- `StageManager.cs` — начальные ресурсы + убраны LoadAsync/SaveAsync
+- `ColonyManager.cs` — SetSimulationState + GetStateAsync + очистка
+- `IColonyManager.cs` — добавлен SetSimulationState в интерфейс
+- `ModMain.cs` — вызов TryMaterializePendingColoniesAsync + SetSimulationState
+- `ColonyManagerTests.cs` — обновлён тест RemoveColony
 
 ## Что работает
 
@@ -83,22 +49,20 @@ NativePlayfieldSpawner → IPlayfield.SpawnPrefab()
 - Spawning & Evolution: EntitySpawner, StageManager
 - Placement: PlacementResolver
 - Economy: EconomySimulator, UnitEconomyManager
-- Colony Management: ColonyManager
-- Colony Virtualization: создание → развитие → материализация
+- Colony Management: ColonyManager, Colony Virtualization
 
-### ✅ Phase 3.1 (Native Spawner) — НОВОЕ
-- NativePlayfieldSpawner для PfServer
-- UnityTypeConverter для Unity типов
+### ✅ Phase 3.1 (Native Spawner)
+- NativePlayfieldSpawner, UnityTypeConverter
 - Упрощенная инициализация PfServer без Gateway
-- HandleIPCRequestWithNativeSpawner для IPC
+
+### ✅ Phase 3.2 (Fix colony spawn) — НОВОЕ
+- In-memory state как единственный источник правды
+- Начальные ресурсы от логистического корабля (1100 ед.)
+- TryMaterializePendingColoniesAsync вызывается из Game_Update
+- Убраны все файловые операции из тикового цикла
 
 ## Что дальше
 
-1. **Сборка:** `dotnet build src/GalacticExpansion.sln --configuration Release --no-restore`
-2. **Тестирование:**
-   - Запуск dedicated server
-   - Вход игрока на playfield → нет краша
-   - Материализация колонии → spawn через Native Spawner
-   - Проверка логов: `[PfServer-Native] Structure spawn successful`
-3. Phase 3.5: server testing (мультиплеер, нагрузка)
-4. Phase 4: Threat Director + AIM Orchestrator
+1. Тестирование на dedicated server: полный цикл LandingPending → BaseL1
+2. Phase 3.5: server testing (мультиплеер, нагрузка)
+3. Phase 4: Threat Director + AIM Orchestrator
