@@ -2,43 +2,40 @@
 
 ## Текущий статус
 
-**Дата обновления:** 22.02.2026  
-**Phase 3.2 (Fix colony spawn):** ✅ РЕАЛИЗОВАНО  
+**Дата обновления:** 23.02.2026  
+**Phase 3.3 (Fix materialization):** ✅ РЕАЛИЗОВАНО  
 **Phase 4 (Combat):** не начата
 
 ## Недавний прогресс
 
-### Phase 3.2 — Исправление спавна базы колонии ✅
+### Phase 3.3 — Исправление материализации колоний ✅
 
-**Задача:** Исправить 3 критических бага, блокирующих спавн базы.
+**Задача:** Колония развивалась виртуально, но структуры не спавнились на playfield.
 
-**Баг 1: Ресурсы уничтожались каждый тик**
-- `SimulationEngine.OnSimulationTick()` перезагружал state из файла после каждого тика
-- `resources before=0` на каждом из 120+ тиков при rate=100
-- **Исправление:** убрана перезагрузка, заменена на `_state.IsDirty = true`
+**Баг 1: PendingMaterialization никогда не становилась true**
+- `ColonyTickModule` подписывался на `GameEventReceived` после `Event_Playfield_Loaded` (опоздание 30 сек)
+- **Исправление:** PfServer отправляет IPC `PlayfieldReadyNotification` → Dedi вызывает `EnsurePlayfieldColoniesSpawnedAsync`
 
-**Баг 2: Начальные ресурсы не выдавались**
-- По FR-004 логистический корабль доставляет ресурсы
-- Колония создавалась с `VirtualResources = 0`
-- **Исправление:** при создании выдаётся 1100 ресурсов (ConstructionYard + BaseL1 + 10%)
+**Баг 2: MaterializeColonyAsync спавнила хардкод**
+- Использовался `DropShips.PrefabName` вместо префаба текущей стадии
+- **Исправление:** спавн из `_config.Zirax.Stages` по `colony.Stage`
 
-**Баг 3: TryMaterializePendingColoniesAsync нигде не вызывался**
-- Комментарии в коде противоречили друг другу
-- **Исправление:** добавлен вызов в `ModMain.Game_Update()` секции Dedi
+**Баг 3: Спам "State file not found" (1433 записи)**
+- `Game_Update` вызывал `TryMaterializePendingColoniesAsync` до старта симуляции
+- **Исправление:** guard `_simulationStarted` в `Game_Update`
 
-**Дополнительные улучшения:**
-- Убраны все избыточные `_stateStore.LoadAsync()` из тиковых методов
-- `ColonyManager` получил `SetSimulationState()` для работы с in-memory state
-- StageManager: убран антипаттерн LoadAsync + ручное копирование полей
-- Тесты обновлены: 175/175 проходят
+**Архитектурное улучшение: немедленный старт симуляции**
+- Симуляция запускается сразу в конце `InitializeGatewayAndModulesForDedi`
+- Колонии развиваются автономно, не зависят от подключения игроков
+- Убрана зависимость от `Event_Playfield_Loaded` для старта
 
 **Изменённые файлы:**
-- `SimulationEngine.cs` — убрана перезагрузка state из файла каждый тик
-- `StageManager.cs` — начальные ресурсы + убраны LoadAsync/SaveAsync
-- `ColonyManager.cs` — SetSimulationState + GetStateAsync + очистка
-- `IColonyManager.cs` — добавлен SetSimulationState в интерфейс
-- `ModMain.cs` — вызов TryMaterializePendingColoniesAsync + SetSimulationState
-- `ColonyManagerTests.cs` — обновлён тест RemoveColony
+- `ModMain.cs` — немедленный старт, guard, IPC подписка, PfServer отправка уведомления
+- `IPCProtocol.cs` — класс `PlayfieldReadyNotification`
+- `NetworkBridge.cs` — `SendNotificationToDedi`, событие `OnPlayfieldReadyReceived`, десериализация
+- `StageManager.cs` — `MaterializeColonyAsync` спавнит текущую стадию
+
+**Тесты:** 175/175 (158 unit + 17 integration)
 
 ## Что работает
 
@@ -55,14 +52,19 @@
 - NativePlayfieldSpawner, UnityTypeConverter
 - Упрощенная инициализация PfServer без Gateway
 
-### ✅ Phase 3.2 (Fix colony spawn) — НОВОЕ
+### ✅ Phase 3.2 (Fix colony spawn)
 - In-memory state как единственный источник правды
 - Начальные ресурсы от логистического корабля (1100 ед.)
 - TryMaterializePendingColoniesAsync вызывается из Game_Update
-- Убраны все файловые операции из тикового цикла
+
+### ✅ Phase 3.3 (Fix materialization)
+- IPC PlayfieldReadyNotification (PfServer → Dedi)
+- MaterializeColonyAsync спавнит префаб текущей стадии
+- Немедленный старт симуляции (без ожидания playfield)
+- Guard `_simulationStarted` устраняет спам до старта
 
 ## Что дальше
 
-1. Тестирование на dedicated server: полный цикл LandingPending → BaseL1
+1. Тестирование на dedicated server: полный цикл → ConstructionYard видим → BaseL1 через 10 мин
 2. Phase 3.5: server testing (мультиплеер, нагрузка)
 3. Phase 4: Threat Director + AIM Orchestrator

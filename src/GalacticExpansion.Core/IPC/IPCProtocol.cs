@@ -266,4 +266,28 @@ namespace GalacticExpansion.Core.IPC
         [JsonProperty("pf")]
         public string Playfield { get; set; } = string.Empty;
     }
+
+    /// <summary>
+    /// Уведомление от PfServer к Dedi о том, что playfield полностью загружен и готов к spawn-операциям.
+    /// Отправляется после создания NativePlayfieldSpawner и регистрации IPC handler.
+    /// Dedi получает это уведомление и вызывает EnsurePlayfieldColoniesSpawnedAsync,
+    /// чтобы пометить виртуальные колонии для материализации (PendingMaterialization = true).
+    /// Это fire-and-forget сообщение — ответ от Dedi не ожидается.
+    /// </summary>
+    public class PlayfieldReadyNotification : IPCMessage
+    {
+        /// <summary>
+        /// Инициализирует уведомление о готовности playfield.
+        /// </summary>
+        public PlayfieldReadyNotification()
+        {
+            MessageType = "PlayfieldReadyNotification";
+        }
+
+        /// <summary>
+        /// Название playfield, который полностью загружен и готов к spawn-операциям
+        /// </summary>
+        [JsonProperty("pf")]
+        public string Playfield { get; set; } = string.Empty;
+    }
 }

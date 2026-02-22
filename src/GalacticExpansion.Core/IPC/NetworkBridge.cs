@@ -35,6 +35,13 @@ namespace GalacticExpansion.Core.IPC
         public event Func<IPCMessage, string, Task<IPCMessage?>>? OnRequestReceived;
 
         /// <summary>
+        /// Событие: PfServer сообщил что playfield полностью загружен и готов к spawn-операциям.
+        /// Dedi подписывается на это событие для вызова EnsurePlayfieldColoniesSpawnedAsync.
+        /// Параметр — название playfield.
+        /// </summary>
+        public event Action<string>? OnPlayfieldReadyReceived;
+
+        /// <summary>
         /// Инициализирует новый экземпляр NetworkBridge для управления IPC коммуникацией.
         /// </summary>
         /// <param name="modApi">API мода для доступа к сетевым функциям Empyrion</param>
@@ -98,6 +105,29 @@ namespace GalacticExpansion.Core.IPC
             else
             {
                 _logger.Error("❌ Failed to register PfServer receiver");
+            }
+        }
+
+        /// <summary>
+        /// Отправляет fire-and-forget уведомление от PfServer к Dedi (без ожидания ответа).
+        /// Используется PfServer для отправки PlayfieldReadyNotification после загрузки playfield.
+        /// </summary>
+        /// <param name="notification">IPC-сообщение для отправки</param>
+        public void SendNotificationToDedi(IPCMessage notification)
+        {
+            if (notification == null)
+                throw new ArgumentNullException(nameof(notification));
+
+            var data = SerializeMessage(notification);
+            var playfield = _currentPlayfield ?? "Unknown";
+
+            if (_modApi.Network.SendToDedicatedServer(_receiverId, data, playfield))
+            {
+                _logger.Info($"[PfServer] Sent {notification.MessageType} to Dedi (playfield: {playfield})");
+            }
+            else
+            {
+                _logger.Error($"[PfServer] Failed to send {notification.MessageType} to Dedi (playfield: {playfield})");
             }
         }
 
@@ -190,7 +220,16 @@ namespace GalacticExpansion.Core.IPC
 
                 _logger.Debug($"[Dedi] Message type: {message.MessageType}, RequestId: {message.RequestId}");
 
-                // Находим pending request
+                // PlayfieldReadyNotification — fire-and-forget уведомление от PfServer,
+                // не имеет pending request. Вызываем событие для обработки на Dedi.
+                if (message is PlayfieldReadyNotification readyNotification)
+                {
+                    _logger.Info($"[Dedi] Received PlayfieldReadyNotification for '{readyNotification.Playfield}' from PfServer");
+                    OnPlayfieldReadyReceived?.Invoke(readyNotification.Playfield);
+                    return;
+                }
+
+                // Находим pending request (для request/response сообщений)
                 if (_pendingRequests.TryRemove(message.RequestId, out var pendingRequest))
                 {
                     // Завершаем Task с полученным ответом
@@ -315,6 +354,7 @@ namespace GalacticExpansion.Core.IPC
                     "SpawnNPCResponse" => JsonConvert.DeserializeObject<SpawnNPCResponse>(json),
                     "PlayfieldReady" => JsonConvert.DeserializeObject<PlayfieldReadyRequest>(json),
                     "PlayfieldReadyResponse" => JsonConvert.DeserializeObject<PlayfieldReadyResponse>(json),
+                    "PlayfieldReadyNotification" => JsonConvert.DeserializeObject<PlayfieldReadyNotification>(json),
                     _ => throw new InvalidOperationException($"Unknown message type: {baseMessage.MessageType}")
                 };
             }

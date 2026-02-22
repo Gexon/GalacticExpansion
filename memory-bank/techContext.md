@@ -26,9 +26,9 @@
 ## Структура проекта
 
 - `src/GalacticExpansion.Core` — модули
-  - `IPC/` - IPC протокол и NetworkBridge
+  - `IPC/` - IPC протокол, NetworkBridge, PlayfieldReadyNotification
   - `Spawning/` - EntitySpawner, IPCEntitySpawner, NativePlayfieldSpawner, StageManager
-  - `Simulation/` - SimulationEngine, ColonyManager, модули
+  - `Simulation/` - SimulationEngine, ColonyManager, ColonyTickModule
   - `Economy/` - EconomySimulator, UnitEconomyManager
   - `Gateway/` - EmpyrionGateway для ModAPI
 - `src/GalacticExpansion.Models` — модели данных
@@ -38,28 +38,22 @@
 ## Локальная разработка
 
 - Сборка: `dotnet build src/GalacticExpansion.sln --configuration Release`
-- Тесты: `dotnet test src/GalacticExpansion.sln --configuration Release`
+- Тесты: `dotnet test src/GalacticExpansion.sln`
 - **ВАЖНО:** При NuGet proxy проблемах: `--no-restore`
 
 ## Логирование
 
 - NLog, путь к конфигу задается явно в `ModMain`
-- **Префиксы процессов**: `[Dedi-PID]` / `[PfServer-PID]` / `[PfServer-Native]`
+- **Префиксы процессов**: `[Dedi-PID]` / `[PfServer-PID]`
 - Layout: `${longdate}|${level}|${logger}|${gdc:item=process}|${message}`
 
-## State Management (Phase 3.2 — ОБНОВЛЕНО!)
+## State Management
 
 ### Принцип: In-memory state = единственный источник правды
-
 - `SimulationEngine._state` — канонический объект SimulationState
 - `_stateStore.LoadAsync()` — **ТОЛЬКО при запуске** (StartAsync)
 - `_stateStore.SaveAsync()` — автосохранение каждые 60 сек + при shutdown
 - **ЗАПРЕЩЕНО** LoadAsync внутри тикового цикла!
-
-### ColonyManager.SetSimulationState()
-- Инжектирует ссылку на in-memory state из SimulationEngine
-- Вызывается из ModMain после `_simulationEngine.StartAsync()`
-- До вызова — fallback на `_stateStore.LoadAsync()` (только при инициализации)
 
 ### Конфигурация стадий (из ConfigurationLoader, defaults)
 ```
@@ -74,16 +68,25 @@ BaseMax: RequiredResources=10000, ProductionRate=300, MinTime=14400s
 
 ### Dedi процесс:
 ```
-NetworkBridge → IPCEntitySpawner → StageManager → ColonyManager → модули
-SimulationEngine (тики) → ColonyTickModule → UpdateColonyAsync
-Game_Update → TryMaterializePendingColoniesAsync
+IMod.Init → InitializeGatewayAndModulesForDedi
+  → регистрация модулей → SimulationEngine.StartAsync() [немедленно]
+  → _simulationStarted = true → SetSimulationState(_state)
+NetworkBridge.OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync
+Game_Update (guard _simulationStarted) → TryMaterializePendingColoniesAsync
 ```
 
 ### PfServer процесс:
 ```
 OnPlayfieldLoaded → IPlayfield → NativePlayfieldSpawner
+  → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification)
 NetworkBridge → HandleIPCRequestWithNativeSpawner
 ```
+
+## IPC протокол (типы сообщений)
+- `SpawnStructure` / `SpawnStructureResponse` — спавн структуры
+- `SpawnNPC` / `SpawnNPCResponse` — спавн NPC
+- `PlayfieldReady` / `PlayfieldReadyResponse` — проверка готовности
+- `PlayfieldReadyNotification` — fire-and-forget уведомление о готовности playfield (PfServer → Dedi)
 
 ## Известные нюансы
 

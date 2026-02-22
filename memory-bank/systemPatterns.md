@@ -16,76 +16,68 @@
 
 ## Ключевые технические решения
 
-### In-Memory State Pattern (Phase 3.2 — КРИТИЧЕСКОЕ!)
+### In-Memory State Pattern (Phase 3.2)
 
-**Принцип:** `SimulationEngine._state` — единственный источник правды во время работы симуляции. Файл `state.json` — только для персистентности между перезапусками.
+**Принцип:** `SimulationEngine._state` — единственный источник правды во время работы симуляции.
 
 **Правила:**
 1. **ЗАПРЕЩЕНО** вызывать `_stateStore.LoadAsync()` внутри тикового цикла
 2. Модули работают напрямую с объектами из `_state.Colonies`
-3. `_state.IsDirty = true` ставится каждый тик
-4. Автосохранение в файл каждые 60 сек + при shutdown
-5. `ColonyManager.SetSimulationState()` инжектит ссылку на in-memory state после старта SimulationEngine
+3. Автосохранение в файл каждые 60 сек + при shutdown
+4. `ColonyManager.SetSimulationState()` инжектит ссылку на in-memory state
 
-**Поток данных:**
+### Immediate Simulation Start (Phase 3.3)
+
+**Принцип:** Симуляция запускается сразу в конце `InitializeGatewayAndModulesForDedi`, не дожидаясь загрузки playfield или подключения игроков. Колонии живут автономно.
+
+**Обоснование:** Колонии должны развиваться независимо от игроков. После перезапуска сервера виртуальная симуляция (ресурсы, стадии) работает с первой секунды.
+
+### IPC PlayfieldReadyNotification (Phase 3.3)
+
+**Принцип:** Материализация колоний запускается по сигналу от PfServer, а не по `Event_Playfield_Loaded` на Dedi.
+
+**Цепочка:**
 ```
-Запуск: LoadAsync() -> _state (in-memory)
-Тик: context.CurrentState = _state -> модули работают напрямую
-Game_Update: TryMaterializePendingColoniesAsync() -> in-memory state
-Автосохранение (60 сек): SaveAsync(_state) -> state.json
-Shutdown: SaveAsync(_state) -> state.json
+PfServer: OnPlayfieldLoaded → NativePlayfieldSpawner создан → IPC готов
+  → SendNotificationToDedi(PlayfieldReadyNotification{Playfield})
+Dedi: OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync(playfield)
+  → PendingMaterialization = true
+Game_Update: TryMaterializePendingColoniesAsync → IPC спавн через PfServer
 ```
 
-**Ошибка-предшественник:** SimulationEngine перезагружал state из файла каждый тик (`_stateStore.LoadAsync()`), уничтожая все in-memory изменения VirtualResources.
+**Гарантии:**
+- Сигнал идёт именно с того PfServer, который обслуживает playfield колонии
+- PfServer уже полностью загружен (IPlayfield готов, NativePlayfieldSpawner создан)
+- `_simulationStarted` guard: материализация вызывается только после старта симуляции
 
 ### Logistics Ship Resources Pattern (Phase 3.2)
 
-**Принцип:** Логистический корабль доставляет начальные ресурсы при создании колонии. Ресурсов достаточно для ConstructionYard + BaseL1. Самостоятельное накопление через ProductionRate — только с BaseL2.
-
-**Формула:** `initialResources = (ConstructionYard.RequiredResources + BaseL1.RequiredResources) * 1.1`
-
-С текущим конфигом: `(0 + 1000) * 1.1 = 1100 VirtualResources`
+**Формула:** `initialResources = (ConstructionYard.RequiredResources + BaseL1.RequiredResources) * 1.1 = 1100`
 
 ### Native Playfield Spawner Pattern (Phase 3.1)
 
-**Проблема:** PfServer крашится при инициализации из-за отсутствия ModGameAPI.
-**Решение:** Прямой спавн через IPlayfield API без Gateway/ModGameAPI.
+```
+OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
+  → IPlayfield.SpawnPrefab() / SpawnEntity() (СИНХРОННЫЙ!)
+```
 
-```
-OnPlayfieldLoaded → IPlayfield instance
-    → NativePlayfieldSpawner(pfInstance)
-    → IPlayfield.SpawnPrefab() / SpawnEntity() (СИНХРОННЫЙ!)
-```
+### MaterializeColonyAsync: Stage-Based Prefab (Phase 3.3)
+
+**Принцип:** При материализации спавнится префаб текущей стадии колонии из `_config.Zirax.Stages`, а не хардкод из DropShips.
 
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
-- Тесты проверяют соответствие контрактам.
-
-### Event_Error Handling (ModAPI)
-- При ответе игры на запрос с ошибкой приходит `CmdId.Event_Error` и объект `ErrorInfo`.
-- Шлюз обрабатывает Event_Error: вызывает `SequenceManager.CompleteWithError(seqNr, exception)`.
-
-### Playfield Load Handling & Colony Virtualization (Phase 3)
-
-1. **Создание виртуальной колонии** (при старте мода):
-   - `ColonyTickModule.InitializeAsync` → `CreateColonyAsync` → `InitializeColonyAsync`
-   - `IsVirtual = true`, начальные ресурсы = 1100
-   - Развивается в памяти: ресурсы, юниты, переходы стадий
-
-2. **Материализация** (через IPC из Dedi в PfServer):
-   - `Event_Playfield_Loaded` → `EnsurePlayfieldColoniesSpawnedAsync` → `PendingMaterialization = true`
-   - `Game_Update` → `TryMaterializePendingColoniesAsync()` → проверка готовности → IPC
-   - PfServer: `HandleIPCRequestWithNativeSpawner()` → `NativePlayfieldSpawner`
 
 ## Важные инварианты
 
 1. **In-memory state — единственный источник правды** во время работы симуляции.
-2. **Файл state.json** — только для персистентности (автосохранение 60 сек + shutdown).
-3. **ЗАПРЕЩЕНО** `_stateStore.LoadAsync()` внутри тикового цикла.
-4. `SeqNr` уникальны и корректно сопоставляются.
-5. Rate limiting обязателен для ModAPI запросов (только Dedi).
-6. Спавн в Dedi через `IEntitySpawner` (IPCEntitySpawner).
-7. Спавн в PfServer через `NativePlayfieldSpawner` (прямой IPlayfield API).
-8. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
-9. **Multi-process:** Spawn работает только из PfServer процесса.
-10. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
+2. **ЗАПРЕЩЕНО** `_stateStore.LoadAsync()` внутри тикового цикла.
+3. **Симуляция стартует немедленно** — не ждёт playfield / игроков.
+4. **Материализация по IPC** — PfServer → PlayfieldReadyNotification → Dedi.
+5. **Guard `_simulationStarted`** — TryMaterializePendingColoniesAsync только после старта.
+6. `SeqNr` уникальны и корректно сопоставляются.
+7. Rate limiting обязателен для ModAPI запросов (только Dedi).
+8. Спавн в Dedi через `IPCEntitySpawner`, в PfServer через `NativePlayfieldSpawner`.
+9. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
+10. **Multi-process:** Spawn работает только из PfServer процесса.
+11. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`

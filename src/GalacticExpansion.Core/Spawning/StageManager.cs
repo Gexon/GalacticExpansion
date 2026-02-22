@@ -362,14 +362,16 @@ namespace GalacticExpansion.Core.Spawning
             // Обновляем позицию колонии
             colony.Position = position;
 
-            // Спавним структуру в зависимости от текущей стадии
-            var dropPrefab = _config.Zirax?.DropShips?.FirstOrDefault()?.PrefabName ?? "BA_ConstructionSite";
+            // Спавним структуру текущей стадии колонии (ConstructionYard -> BA_ConstructionSite, BaseL1 -> BA_Zirax_Small_1 и т.д.)
+            var stageConfig = _config.Zirax.Stages.FirstOrDefault(s => s.Stage == colony.Stage.ToString());
+            var prefab = stageConfig?.PrefabName ?? "BA_ConstructionSite";
+            _logger.Info($"Colony {colony.Id}: materializing with prefab '{prefab}' for stage {colony.Stage}");
             
             try
             {
                 var structureId = await _entitySpawner.SpawnStructureAtTerrainAsync(
                     colony.Playfield,
-                    dropPrefab,
+                    prefab,
                     position.X,
                     position.Z,
                     colony.FactionId,
@@ -379,7 +381,7 @@ namespace GalacticExpansion.Core.Spawning
                 colony.MainStructureId = structureId;
                 colony.IsVirtual = false; // Колония теперь материализована
 
-                _logger.Info($"Colony {colony.Id} materialized successfully with structure {structureId} at {position}");
+                _logger.Info($"Colony {colony.Id} materialized successfully with structure {structureId} (prefab: {prefab}) at {position}");
             }
             catch (Exception ex)
             {

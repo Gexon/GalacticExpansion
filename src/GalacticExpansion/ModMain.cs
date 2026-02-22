@@ -175,47 +175,6 @@ namespace GalacticExpansion
                     }
                 }
                 
-                // КРИТИЧЕСКИ ВАЖНО для Dedi: Event_Playfield_Loaded - первый раз запускаем симуляцию с задержкой 30 секунд
-                if (_processMode == ApplicationMode.DedicatedServer && eventId == CmdId.Event_Playfield_Loaded && !_simulationStarted)
-                {
-                    if (data is PlayfieldLoad pfLoad && !string.IsNullOrEmpty(pfLoad.playfield))
-                    {
-                        _logger?.Info($"[Dedi] Event_Playfield_Loaded: {pfLoad.playfield} - scheduling simulation start in 30 seconds");
-                        
-                        // Отложенный запуск симуляции
-                        _ = Task.Run(async () =>
-                        {
-                            await Task.Delay(TimeSpan.FromSeconds(30));
-                            
-                            if (_simulationEngine != null && !_simulationEngine.IsRunning)
-                            {
-                                _logger?.Info("[Dedi] Starting simulation engine (delayed start)...");
-                                await _simulationEngine.StartAsync();
-                                
-                                await Task.Delay(500);
-                                
-                                _currentState = _simulationEngine.State;
-                                _lastBackupTime = DateTime.UtcNow;
-                                _simulationStarted = true;
-
-                                // Передаём in-memory state в ColonyManager, чтобы он работал
-                                // напрямую с тем же state, что и SimulationEngine (без чтения файла)
-                                if (_colonyManager != null && _currentState != null)
-                                {
-                                    _colonyManager.SetSimulationState(_currentState);
-                                }
-                                
-                                _logger?.Info("========================================");
-                                _logger?.Info("[Dedi] GLEX simulation started successfully!");
-                                _logger?.Info($"  Delayed start: 30 seconds after first playfield load");
-                                _logger?.Info($"  Home Playfield: {_config?.HomePlayfield}");
-                                _logger?.Info($"  Tick Interval: {_config?.Simulation.TickIntervalMs}ms");
-                                _logger?.Info("========================================");
-                            }
-                        });
-                    }
-                }
-
                 // Передаем событие в Gateway для обработки (если Gateway инициализирован)
                 _gateway?.HandleEvent(eventId, seqNr, data);
             }
@@ -251,7 +210,9 @@ namespace GalacticExpansion
                     // Материализация виртуальных колоний (retry-логика с проверкой готовности playfield).
                     // EnsurePlayfieldColoniesSpawnedAsync помечает колонии (PendingMaterialization=true),
                     // а TryMaterializePendingColoniesAsync выполняет фактический спавн через IPC.
-                    if (_colonyManager != null)
+                    // Guard: вызываем только после старта симуляции, чтобы _simulationState уже был инициализирован
+                    // и не спамить LoadAsync() -> "State file not found" до старта.
+                    if (_simulationStarted && _colonyManager != null)
                     {
                         try
                         {
@@ -542,6 +503,22 @@ namespace GalacticExpansion
                 _networkBridge.InitializeForDedi();
                 _logger?.Info("✅ NetworkBridge initialized for Dedi (can send commands to PfServer)");
 
+                // Подписка на PlayfieldReadyNotification от PfServer.
+                // Когда PfServer сообщает что playfield загружен, помечаем виртуальные колонии
+                // на этом playfield для материализации (PendingMaterialization = true).
+                _networkBridge.OnPlayfieldReadyReceived += (playfield) =>
+                {
+                    _logger?.Info($"[Dedi] Received PlayfieldReadyNotification from PfServer for '{playfield}'");
+                    if (_simulationStarted && _colonyManager != null)
+                    {
+                        _ = _colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield);
+                    }
+                    else
+                    {
+                        _logger?.Debug($"[Dedi] Simulation not started yet, ignoring PlayfieldReady for '{playfield}'");
+                    }
+                };
+
                 // Инициализируем базовые компоненты (Gateway, StateStore, EventBus, ModuleRegistry)
                 // НО НЕ создаем EntitySpawner и зависимые модули!
                 InitializeGatewayAndModulesForDedi(modAPI);
@@ -720,16 +697,48 @@ namespace GalacticExpansion
                 _simulationEngine.RegisterModule(colonyTickModule);
                 logger.Info("ColonyTickModule registered");
                 
-                // НЕ ЗАПУСКАЕМ симуляцию сразу - запуск произойдет через 30 секунд после первого Event_Playfield_Loaded
-                logger.Info("SimulationEngine created (will start after first playfield loads + 30 sec delay)");
-                
-                _lastBackupTime = DateTime.UtcNow;
+                // Запускаем симуляцию сразу после инициализации всех модулей.
+                // Симуляция работает с виртуальными колониями и не требует загруженного playfield.
+                // Материализация колоний произойдёт позже по IPC-уведомлению PlayfieldReadyNotification от PfServer.
+                // Это позволяет колониям жить автономно, независимо от подключения игроков.
+                logger.Info("Starting SimulationEngine immediately after initialization...");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _simulationEngine.StartAsync();
+                        
+                        // Минимальная пауза для завершения инициализации модулей (InitializeAsync)
+                        await Task.Delay(500);
+                        
+                        _currentState = _simulationEngine.State;
+                        _lastBackupTime = DateTime.UtcNow;
+                        _simulationStarted = true;
+
+                        // Передаём in-memory state в ColonyManager, чтобы он работал
+                        // напрямую с тем же state, что и SimulationEngine (без чтения файла)
+                        if (_colonyManager != null && _currentState != null)
+                        {
+                            _colonyManager.SetSimulationState(_currentState);
+                        }
+                        
+                        _logger?.Info("========================================");
+                        _logger?.Info("[Dedi] GLEX simulation started successfully!");
+                        _logger?.Info($"  Home Playfield: {_config?.HomePlayfield}");
+                        _logger?.Info($"  Tick Interval: {_config?.Simulation.TickIntervalMs}ms");
+                        _logger?.Info("========================================");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, "Failed to start SimulationEngine");
+                    }
+                });
 
                 logger.Info("========================================");
                 logger.Info("GLEX Dedi process initialized successfully!");
                 logger.Info($"  Home Playfield: {_config.HomePlayfield}");
                 logger.Info($"  IPC Mode: ENABLED (spawn via NetworkBridge)");
-                logger.Info($"  Simulation: DEFERRED (will start 30 sec after first playfield load)");
+                logger.Info($"  Simulation: STARTING (immediate, no playfield dependency)");
                 logger.Info("========================================");
             }
             catch (Exception ex)
@@ -788,6 +797,15 @@ namespace GalacticExpansion
                                 return await HandleIPCRequestWithNativeSpawner(request, pfName, nativeSpawner);
                             };
                             _logger?.Info($"✅ [PfServer] IPC handler registered with NativePlayfieldSpawner");
+
+                            // Уведомляем Dedi что playfield полностью загружен и готов к spawn-операциям.
+                            // Dedi получит это и вызовет EnsurePlayfieldColoniesSpawnedAsync -> PendingMaterialization = true.
+                            var readyNotification = new GalacticExpansion.Core.IPC.PlayfieldReadyNotification
+                            {
+                                Playfield = _currentPlayfield
+                            };
+                            _networkBridge.SendNotificationToDedi(readyNotification);
+                            _logger?.Info($"✅ [PfServer] Sent PlayfieldReadyNotification to Dedi for '{_currentPlayfield}'");
                         }
                         else
                         {
