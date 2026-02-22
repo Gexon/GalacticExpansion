@@ -28,27 +28,47 @@
 
 ### Immediate Simulation Start (Phase 3.3)
 
-**Принцип:** Симуляция запускается сразу в конце `InitializeGatewayAndModulesForDedi`, не дожидаясь загрузки playfield или подключения игроков. Колонии живут автономно.
+**Принцип:** Симуляция запускается сразу в конце `InitializeGatewayAndModulesForDedi`, не дожидаясь загрузки playfield или подключения игроков.
 
-**Обоснование:** Колонии должны развиваться независимо от игроков. После перезапуска сервера виртуальная симуляция (ресурсы, стадии) работает с первой секунды.
+### ЗАПРЕТ на .GetAwaiter().GetResult() в Game_Update (Phase 3.4)
 
-### IPC PlayfieldReadyNotification (Phase 3.3)
+**Принцип:** НИКОГДА не вызывать `.GetAwaiter().GetResult()` (или `.Wait()`, `.Result`) на async-методах из `Game_Update()` или любого callback Empyrion.
 
-**Принцип:** Материализация колоний запускается по сигналу от PfServer, а не по `Event_Playfield_Loaded` на Dedi.
+**Причина:** Empyrion работает на Unity. `await` внутри async-методов захватывает `SynchronizationContext` (Unity main thread). `.GetResult()` блокирует main thread → continuation не может вернуться → **deadlock навсегда**.
+
+**Правильный паттерн:**
+```csharp
+// НЕЛЬЗЯ (deadlock!):
+_colonyManager.TryMaterializePendingColoniesAsync().GetAwaiter().GetResult();
+
+// ПРАВИЛЬНО (fire-and-forget на ThreadPool):
+_ = Task.Run(async () => {
+    await _colonyManager.TryMaterializePendingColoniesAsync();
+});
+```
+
+**Throttle + guard:** Для fire-and-forget из Game_Update обязательны:
+- `_lastAttempt` timestamp — throttle (не чаще раза в N секунд)
+- `volatile bool _inProgress` — защита от параллельных вызовов
+
+### IPC PlayfieldReadyNotification (Phase 3.3 + 3.4)
+
+**Принцип:** Материализация колоний запускается по сигналу от PfServer, а не по опросу `Request_Playfield_Stats`.
 
 **Цепочка:**
 ```
 PfServer: OnPlayfieldLoaded → NativePlayfieldSpawner создан → IPC готов
-  → SendNotificationToDedi(PlayfieldReadyNotification{Playfield})
+  → SendNotificationToDedi(PlayfieldReadyNotification) [retry 3×500ms]
 Dedi: OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync(playfield)
   → PendingMaterialization = true
-Game_Update: TryMaterializePendingColoniesAsync → IPC спавн через PfServer
+Fallback: Event_Playfield_Loaded → ColonyTickModule → EnsurePlayfield (идемпотентно)
+Game_Update: Task.Run(TryMaterialize) [throttle 3s] → IPC спавн через PfServer
 ```
 
 **Гарантии:**
-- Сигнал идёт именно с того PfServer, который обслуживает playfield колонии
-- PfServer уже полностью загружен (IPlayfield готов, NativePlayfieldSpawner создан)
-- `_simulationStarted` guard: материализация вызывается только после старта симуляции
+- PfServer полностью загружен (NativePlayfieldSpawner создан, IPC handler зарегистрирован)
+- Retry обеспечивает надёжность доставки уведомления
+- Fallback через Event_Playfield_Loaded — второй путь на случай потери IPC
 
 ### Logistics Ship Resources Pattern (Phase 3.2)
 
@@ -63,7 +83,7 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 
 ### MaterializeColonyAsync: Stage-Based Prefab (Phase 3.3)
 
-**Принцип:** При материализации спавнится префаб текущей стадии колонии из `_config.Zirax.Stages`, а не хардкод из DropShips.
+**Принцип:** При материализации спавнится префаб текущей стадии колонии из `_config.Zirax.Stages`.
 
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
@@ -74,10 +94,11 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 2. **ЗАПРЕЩЕНО** `_stateStore.LoadAsync()` внутри тикового цикла.
 3. **Симуляция стартует немедленно** — не ждёт playfield / игроков.
 4. **Материализация по IPC** — PfServer → PlayfieldReadyNotification → Dedi.
-5. **Guard `_simulationStarted`** — TryMaterializePendingColoniesAsync только после старта.
-6. `SeqNr` уникальны и корректно сопоставляются.
-7. Rate limiting обязателен для ModAPI запросов (только Dedi).
-8. Спавн в Dedi через `IPCEntitySpawner`, в PfServer через `NativePlayfieldSpawner`.
-9. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
-10. **Multi-process:** Spawn работает только из PfServer процесса.
-11. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
+5. **ЗАПРЕЩЕНО** `.GetAwaiter().GetResult()` в Game_Update — deadlock!
+6. **Throttle + guard** обязательны для fire-and-forget из Game_Update.
+7. `SeqNr` уникальны и корректно сопоставляются.
+8. Rate limiting обязателен для ModAPI запросов (только Dedi).
+9. Спавн в Dedi через `IPCEntitySpawner`, в PfServer через `NativePlayfieldSpawner`.
+10. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
+11. **Multi-process:** Spawn работает только из PfServer процесса.
+12. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`

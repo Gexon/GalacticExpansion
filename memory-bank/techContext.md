@@ -72,21 +72,30 @@ IMod.Init → InitializeGatewayAndModulesForDedi
   → регистрация модулей → SimulationEngine.StartAsync() [немедленно]
   → _simulationStarted = true → SetSimulationState(_state)
 NetworkBridge.OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync
-Game_Update (guard _simulationStarted) → TryMaterializePendingColoniesAsync
+Game_Update (guard _simulationStarted) → Task.Run(TryMaterialize) [throttle 3s]
 ```
 
 ### PfServer процесс:
 ```
 OnPlayfieldLoaded → IPlayfield → NativePlayfieldSpawner
-  → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification)
+  → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification) [retry 3×500ms]
 NetworkBridge → HandleIPCRequestWithNativeSpawner
 ```
+
+## Threading Model (КРИТИЧНО!)
+
+**Empyrion = Unity → SynchronizationContext на main thread.**
+
+- `Game_Update()`, `Game_Event()` — Unity main thread
+- `SimulationEngine` тики — `Task.Run` (ThreadPool)
+- **ЗАПРЕЩЕНО** `.GetAwaiter().GetResult()` / `.Wait()` / `.Result` в Game_Update → deadlock!
+- **Правильно:** `_ = Task.Run(async () => await ...)` + throttle + guard
 
 ## IPC протокол (типы сообщений)
 - `SpawnStructure` / `SpawnStructureResponse` — спавн структуры
 - `SpawnNPC` / `SpawnNPCResponse` — спавн NPC
 - `PlayfieldReady` / `PlayfieldReadyResponse` — проверка готовности
-- `PlayfieldReadyNotification` — fire-and-forget уведомление о готовности playfield (PfServer → Dedi)
+- `PlayfieldReadyNotification` — fire-and-forget уведомление (PfServer → Dedi) [retry 3×500ms]
 
 ## Известные нюансы
 

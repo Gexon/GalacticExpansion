@@ -30,7 +30,8 @@ namespace GalacticExpansion.Core.Simulation
         Task RemoveColonyAsync(string colonyId);
 
         /// <summary>
-        /// При загрузке playfield (Event_Playfield_Loaded): помечает виртуальные колонии для материализации.
+        /// Помечает виртуальные колонии на playfield для материализации.
+        /// Вызывается при Event_Playfield_Loaded и/или IPC PlayfieldReadyNotification.
         /// Фактическая материализация происходит через TryMaterializePendingColoniesAsync (retry-логика).
         /// </summary>
         /// <param name="playfield">Имя загруженного playfield.</param>
@@ -38,7 +39,10 @@ namespace GalacticExpansion.Core.Simulation
 
         /// <summary>
         /// Пытается материализовать колонии, помеченные для материализации (retry-логика).
-        /// Вызывается каждый Game_Update. При ошибке повторяет попытки до 30 раз.
+        /// Вызывается из ModMain через Task.Run() с throttle (не чаще раза в 3 секунды).
+        /// НЕЛЬЗЯ вызывать через .GetAwaiter().GetResult() из Game_Update — это вызывает deadlock
+        /// на Unity main thread (continuation от await захватывает SynchronizationContext).
+        /// При ошибке повторяет попытки до 30 раз.
         /// </summary>
         Task TryMaterializePendingColoniesAsync();
 

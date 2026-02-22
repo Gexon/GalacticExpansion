@@ -140,15 +140,14 @@ namespace GalacticExpansion.Core.Simulation
         /// Удаляет колонию
         /// </summary>
         /// <summary>
-        /// При загрузке playfield вызывается из ColonyTickModule по Event_Playfield_Loaded.
-        /// Помечает виртуальные колонии для материализации (отложенный спавн через retry-логику с задержкой).
-        /// 
-        /// Задержка нужна т.к. Event_Playfield_Loaded срабатывает когда playfield начинает загружаться,
-        /// но ещё не готов для операций спавна через ModAPI (PlayfieldConnectionNotFound).
-        /// 
-        /// AI-контекст: Этот метод — критическая точка для материализации виртуальных колоний.
-        /// Задержка в 3 секунды (через отрицательное значение MaterializationAttempts) даёт playfield
-        /// время полностью загрузиться. Retry-логика обеспечивает надёжность при edge-cases.
+        /// Помечает виртуальные колонии на данном playfield для материализации.
+        /// Вызывается из двух мест:
+        /// 1. ColonyTickModule.OnGameEvent → Event_Playfield_Loaded (Empyrion API)
+        /// 2. ModMain.OnPlayfieldReadyReceived → IPC PlayfieldReadyNotification от PfServer
+        ///
+        /// PfServer отправляет PlayfieldReadyNotification ПОСЛЕ полной инициализации NativePlayfieldSpawner,
+        /// что гарантирует готовность playfield к spawn-операциям.
+        /// Retry-логика в TryMaterializePendingColoniesAsync обеспечивает надёжность при IPC ошибках.
         /// </summary>
         public async Task EnsurePlayfieldColoniesSpawnedAsync(string playfield)
         {
@@ -189,10 +188,15 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Пытается материализовать колонии, помеченные для материализации (retry-логика с проверкой готовности).
-        /// Вызывается из Game_Update() в Dedi процессе.
+        /// Пытается материализовать колонии, помеченные для материализации (retry-логика).
         /// 
-        /// Работает с in-memory state -- изменения видны сразу без сохранения в файл.
+        /// ВАЖНО: Этот метод запускается через Task.Run() из ModMain, а НЕ через
+        /// .GetAwaiter().GetResult() — это критично для предотвращения deadlock на Unity main thread.
+        /// Готовность playfield определяется через IPC PlayfieldReadyNotification от PfServer
+        /// (fire-and-forget уведомление после инициализации NativePlayfieldSpawner),
+        /// а не через Request_Playfield_Stats (который вызывал deadlock при синхронном вызове).
+        /// 
+        /// Работает с in-memory state — изменения видны сразу без сохранения в файл.
         /// Персистентность обеспечивается автосохранением SimulationEngine каждые 60 сек.
         /// </summary>
         public async Task TryMaterializePendingColoniesAsync()
@@ -213,70 +217,27 @@ namespace GalacticExpansion.Core.Simulation
 
                 if (colony.MaterializationAttempts >= maxAttempts)
                 {
-                    _logger.Warn($"Colony {colony.Id} failed to materialize after {maxAttempts} attempts (~90 seconds). Giving up.");
+                    _logger.Warn($"Colony {colony.Id} failed to materialize after {maxAttempts} attempts. Giving up.");
                     colony.PendingMaterialization = false;
                     continue;
                 }
 
                 colony.MaterializationAttempts++;
 
-                _logger.Debug($"Checking playfield '{colony.Playfield}' readiness for colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
-                
-                bool isReady = await IsPlayfieldReadyAsync(colony.Playfield);
-                
-                if (!isReady)
-                {
-                    _logger.Debug($"Playfield '{colony.Playfield}' not ready yet for colony {colony.Id}");
-                    continue;
-                }
-
                 try
                 {
-                    _logger.Info($"Playfield '{colony.Playfield}' is READY. Materializing colony {colony.Id} (attempt {colony.MaterializationAttempts}/{maxAttempts})");
+                    _logger.Info($"Materializing colony {colony.Id} on '{colony.Playfield}' (attempt {colony.MaterializationAttempts}/{maxAttempts})");
                     await _stageManager.MaterializeColonyAsync(colony);
                     
                     colony.PendingMaterialization = false;
                     colony.MaterializationAttempts = 0;
                     
-                    _logger.Info($"✅ Colony {colony.Id} materialized successfully");
+                    _logger.Info($"✅ Colony {colony.Id} materialized successfully on '{colony.Playfield}'");
                 }
                 catch (Exception ex)
                 {
                     _logger.Debug($"Materialization attempt {colony.MaterializationAttempts} failed for colony {colony.Id}: {ex.Message}");
                 }
-            }
-        }
-
-        /// <summary>
-        /// Проверяет, готов ли плейфилд для операций спавна через Request_Playfield_Stats.
-        /// 
-        /// AI-контекст: Request_Playfield_Stats работает ТОЛЬКО когда playfield полностью загружен.
-        /// Это надёжный способ проверки готовности плейфилда, рекомендованный в документации Empyrion.
-        /// Ошибка означает "плейфилд ещё не готов" или "нет доступа к playfield connection".
-        /// 
-        /// ВАЖНО: Этот метод ДОЛЖЕН вызываться из Game_Update() в PfServer процессе!
-        /// </summary>
-        /// <param name="playfieldName">Имя плейфилда для проверки.</param>
-        /// <returns>True если плейфилд готов, false если ещё загружается или нет доступа.</returns>
-        private async Task<bool> IsPlayfieldReadyAsync(string playfieldName)
-        {
-            try 
-            {
-                // Запрашиваем статистику плейфилда (работает только когда он полностью загружен)
-                // Используем короткий таймаут (2 секунды) чтобы не блокировать систему
-                await _gateway.SendRequestAsync<PlayfieldStats>(
-                    CmdId.Request_Playfield_Stats, 
-                    new PString(playfieldName),
-                    timeoutMs: 2000
-                );
-                
-                _logger.Debug($"Playfield '{playfieldName}' is ready (Request_Playfield_Stats succeeded)");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug($"Playfield '{playfieldName}' not ready yet: {ex.Message}");
-                return false;
             }
         }
 

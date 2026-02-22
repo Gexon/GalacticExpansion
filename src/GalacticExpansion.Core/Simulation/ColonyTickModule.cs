@@ -78,12 +78,13 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Обработчик событий от игры: Event_Playfield_Loaded - материализация виртуальных колоний с задержкой.
+        /// Обработчик событий от игры: Event_Playfield_Loaded — fallback для материализации виртуальных колоний.
         /// 
-        /// AI-контекст: Event_Playfield_Loaded срабатывает когда playfield НАЧИНАЕТ загружаться,
-        /// но ещё НЕ готов для операций спавна. Поэтому мы только помечаем колонии для материализации
-        /// с задержкой (MaterializationAttempts = -3), а фактический спавн происходит в TryMaterializePendingColoniesAsync
-        /// через 3 секунды + retry-логику.
+        /// Основной путь материализации — через IPC PlayfieldReadyNotification от PfServer
+        /// (вызывает EnsurePlayfieldColoniesSpawnedAsync в ModMain.OnPlayfieldReadyReceived).
+        /// Event_Playfield_Loaded — запасной вариант на случай, если IPC-уведомление не дойдёт.
+        /// EnsurePlayfieldColoniesSpawnedAsync идемпотентен: повторный вызов безопасен
+        /// (если PendingMaterialization уже true, повторная пометка не происходит).
         /// </summary>
         private void OnGameEvent(object? sender, GameEventArgs e)
         {
@@ -100,7 +101,7 @@ namespace GalacticExpansion.Core.Simulation
             var playfield = playfieldName!;
             _logger.Info($"ColonyTickModule: Playfield_Loaded '{playfield}' - ensuring colonies on playfield");
 
-            // Запускаем материализацию виртуальных колоний с задержкой 3 секунды
+            // Помечаем виртуальные колонии для материализации (fallback, если IPC PlayfieldReadyNotification не дошла)
             _ = Task.Run(() => _colonyManager.EnsurePlayfieldColoniesSpawnedAsync(playfield));
         }
 
@@ -167,9 +168,9 @@ namespace GalacticExpansion.Core.Simulation
         /// <inheritdoc/>
         public void OnSimulationUpdate(SimulationContext context)
         {
-            // ВАЖНО: TryMaterializePendingColoniesAsync теперь вызывается из ModMain.Game_Update()
-            // т.к. spawn-операции работают ТОЛЬКО в контексте PfServer процесса, а SimulationEngine
-            // работает в Dedi процессе (Task.Run). Вызов из Game_Update() гарантирует правильный контекст.
+            // TryMaterializePendingColoniesAsync вызывается из ModMain.Game_Update() через Task.Run()
+            // (НЕ через .GetAwaiter().GetResult() — это вызывает deadlock на Unity main thread).
+            // Spawn-операции проходят через IPC → PfServer, так что контекст вызова не важен.
 
             // Обновление колоний
             if (context?.CurrentState?.Colonies == null || context.CurrentState.Colonies.Count == 0)

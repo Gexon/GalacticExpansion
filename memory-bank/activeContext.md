@@ -3,35 +3,47 @@
 ## Текущее состояние
 
 **Дата обновления:** 23.02.2026  
-**Фаза:** Phase 3.3 — Исправление материализации колоний ✅
+**Фаза:** Phase 3.4 — Fix deadlock + IPC reliability ✅
 
-## Последние изменения (Phase 3.3)
+## Последние изменения (Phase 3.4)
 
-### Исправление материализации: IPC PlayfieldReadyNotification + немедленный старт симуляции
+### Исправление deadlock в Game_Update и ненадёжности IPC
 
-**Проблема:** После Phase 3.2 колония создавалась, ресурсы накапливались, но структуры не спавнились на playfield. 3 бага + 1 архитектурное улучшение:
+**Проблема:** После Phase 3.3 колония создавалась, ресурсы накапливались, `PendingMaterialization` помечалась — но `TryMaterializePendingColoniesAsync` зависала навсегда (deadlock). Структуры не спавнились.
 
-1. **PendingMaterialization никогда не становилась true** — `ColonyTickModule` подписывался на `GameEventReceived` в `InitializeAsync`, но это происходило через 30 сек после `Event_Playfield_Loaded` — событие пропускалось.
-2. **MaterializeColonyAsync спавнила хардкод** — использовался `DropShips.PrefabName` вместо префаба текущей стадии колонии.
-3. **Спам "State file not found" (1433 записи)** — `Game_Update` вызывал `TryMaterializePendingColoniesAsync` до старта симуляции, когда `_simulationState == null`.
-4. **Симуляция зависела от игроков** — запускалась только при `Event_Playfield_Loaded` (когда кто-то заходил на планету).
+**Корневая причина (deadlock):**
+```csharp
+// ModMain.Game_Update() — БЫЛО (вызывало deadlock):
+_colonyManager.TryMaterializePendingColoniesAsync().GetAwaiter().GetResult();
+```
+`.GetAwaiter().GetResult()` блокировал Unity main thread. Внутри `TryMaterializePendingColoniesAsync` вызывался `await _gateway.SendRequestAsync<PlayfieldStats>(...)` — continuation от `await` захватывала `SynchronizationContext` (Unity) и пыталась вернуться на заблокированный main thread → **deadlock навсегда**.
+
+**Доказательства из лога:**
+- `attempt 1/30` — единственная попытка за 170 секунд работы
+- `Request_Playfield_Stats timed out after 2000ms` — ответ не мог быть обработан
+- Нет `attempt 2/30`, `not ready yet`, `Giving up` — Game_Update мёртв
+- Тики симуляции продолжались (они в Task.Run, не на main thread)
+
+**Вторичная проблема:** IPC `PlayfieldReadyNotification` от PfServer не доходила до Dedi (однократная отправка без retry).
 
 **Решение:**
 
-1. **IPC PlayfieldReadyNotification (PfServer → Dedi)**  
-   PfServer отправляет уведомление после `OnPlayfieldLoaded` (когда NativePlayfieldSpawner и IPC handler готовы). Dedi получает и вызывает `EnsurePlayfieldColoniesSpawnedAsync(playfield)` → `PendingMaterialization = true`.
+1. **Убран `.GetAwaiter().GetResult()`** — заменён на `Task.Run()` (fire-and-forget на ThreadPool).
+   Добавлен throttle (3 сек) и `_materializationInProgress` guard от параллельных вызовов.
 
-2. **MaterializeColonyAsync** теперь спавнит префаб текущей стадии колонии (`_config.Zirax.Stages` → `PrefabName`), а не хардкод из DropShips.
+2. **Убран `IsPlayfieldReadyAsync` + `Request_Playfield_Stats`** — deadlock-prone проверка готовности.
+   Готовность playfield определяется через IPC `PlayfieldReadyNotification` от PfServer (гарантированно после инициализации NativePlayfieldSpawner).
 
-3. **Guard `_simulationStarted`** в `Game_Update` — `TryMaterializePendingColoniesAsync` вызывается только после старта симуляции.
+3. **Retry в `SendNotificationToDedi`** — 3 попытки с задержкой 500ms + расширенная диагностика.
 
-4. **Немедленный старт симуляции** — перенесён в конец `InitializeGatewayAndModulesForDedi`. Колонии живут автономно с первой секунды, не зависят от подключения игроков.
+4. **Fallback через `Event_Playfield_Loaded`** — если IPC не дойдёт, `ColonyTickModule.OnGameEvent` всё ещё вызывает `EnsurePlayfieldColoniesSpawnedAsync` (идемпотентно).
 
 **Изменённые файлы:**
-- `ModMain.cs` — немедленный старт симуляции, guard `_simulationStarted`, подписка на `OnPlayfieldReadyReceived`, PfServer отправляет `PlayfieldReadyNotification`
-- `IPCProtocol.cs` — класс `PlayfieldReadyNotification` (fire-and-forget IPC)
-- `NetworkBridge.cs` — `SendNotificationToDedi()`, `OnPlayfieldReadyReceived` событие, десериализация нового типа
-- `StageManager.cs` — `MaterializeColonyAsync` спавнит префаб текущей стадии
+- `ModMain.cs` — Task.Run + throttle + _materializationInProgress guard
+- `ColonyManager.cs` — убран IsPlayfieldReadyAsync, TryMaterialize без блокирующих вызовов gateway
+- `IColonyManager.cs` — обновлены комментарии (предупреждение о deadlock)
+- `NetworkBridge.cs` — retry (3×500ms) в SendNotificationToDedi + диагностика
+- `ColonyTickModule.cs` — обновлены комментарии (fallback роль Event_Playfield_Loaded)
 
 **Результат:** 175/175 тестов (158 unit + 17 integration), сборка без ошибок.
 
@@ -53,10 +65,11 @@
 
 Материализация (PfServer → Dedi):
   PfServer: OnPlayfieldLoaded → NativePlayfieldSpawner готов
-    → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification)
+    → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification) [retry 3×500ms]
   Dedi: OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync
     → PendingMaterialization = true
-  Game_Update → TryMaterializePendingColoniesAsync → IPC → PfServer спавнит
+  Fallback: Event_Playfield_Loaded → ColonyTickModule.OnGameEvent → EnsurePlayfield (идемпотентно)
+  Game_Update → Task.Run(TryMaterializePendingColoniesAsync) [throttle 3s] → IPC → PfServer спавнит
 
 Автосохранение (60 сек): SaveAsync(_state) → state.json
 Shutdown: StopAsync() → SaveAsync(_state) → state.json
@@ -65,10 +78,8 @@ Shutdown: StopAsync() → SaveAsync(_state) → state.json
 ## Следующие шаги
 
 1. **Развёртывание и тестирование** на dedicated server:
-   - Запуск → симуляция стартует сразу → колония создаётся с 1100 ресурсов
-   - LandingPending → ConstructionYard (мгновенно)
-   - Через 10 мин (MinTimeSeconds=600) → BaseL1
-   - Игрок заходит → PfServer отправляет PlayfieldReadyNotification → материализация
-   - Проверить: видна ли структура ConstructionYard/BaseL1 на playfield
+   - Проверить: Game_Update не зависает, тики продолжаются
+   - Проверить: PlayfieldReadyNotification доходит (retry)
+   - Проверить: материализация колонии → ConstructionYard видим на playfield
 2. Phase 3.5: server testing (мультиплеер)
 3. Phase 4: Threat Director + AIM Orchestrator

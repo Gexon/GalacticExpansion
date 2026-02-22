@@ -111,6 +111,8 @@ namespace GalacticExpansion.Core.IPC
         /// <summary>
         /// Отправляет fire-and-forget уведомление от PfServer к Dedi (без ожидания ответа).
         /// Используется PfServer для отправки PlayfieldReadyNotification после загрузки playfield.
+        /// Включает retry-логику (3 попытки с задержкой 500ms) для надёжности,
+        /// т.к. Dedi receiver может ещё не быть полностью инициализирован в момент первой отправки.
         /// </summary>
         /// <param name="notification">IPC-сообщение для отправки</param>
         public void SendNotificationToDedi(IPCMessage notification)
@@ -121,14 +123,40 @@ namespace GalacticExpansion.Core.IPC
             var data = SerializeMessage(notification);
             var playfield = _currentPlayfield ?? "Unknown";
 
-            if (_modApi.Network.SendToDedicatedServer(_receiverId, data, playfield))
+            _logger.Debug($"[PfServer] Attempting to send {notification.MessageType} to Dedi (receiverId: '{_receiverId}', playfield: '{playfield}', data size: {data.Length} bytes)");
+
+            // Retry-логика: 3 попытки с задержкой 500ms между ними.
+            // Dedi receiver может быть ещё не готов при первой попытке (timing issue).
+            _ = Task.Run(async () =>
             {
-                _logger.Info($"[PfServer] Sent {notification.MessageType} to Dedi (playfield: {playfield})");
-            }
-            else
-            {
-                _logger.Error($"[PfServer] Failed to send {notification.MessageType} to Dedi (playfield: {playfield})");
-            }
+                const int maxRetries = 3;
+                const int retryDelayMs = 500;
+                
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        if (_modApi.Network.SendToDedicatedServer(_receiverId, data, playfield))
+                        {
+                            _logger.Info($"[PfServer] Sent {notification.MessageType} to Dedi (playfield: {playfield}, attempt {attempt}/{maxRetries})");
+                            return;
+                        }
+                        
+                        _logger.Warn($"[PfServer] SendToDedicatedServer returned false for {notification.MessageType} (attempt {attempt}/{maxRetries})");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"[PfServer] Error sending {notification.MessageType} (attempt {attempt}/{maxRetries}): {ex.Message}");
+                    }
+
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(retryDelayMs);
+                    }
+                }
+                
+                _logger.Error($"[PfServer] Failed to send {notification.MessageType} to Dedi after {maxRetries} attempts (playfield: {playfield})");
+            });
         }
 
         /// <summary>

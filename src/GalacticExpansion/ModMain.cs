@@ -50,6 +50,7 @@ namespace GalacticExpansion
         
         private DateTime _lastBackupTime;
         private DateTime _lastMaterializationAttempt = DateTime.MinValue; // Для throttling материализации (Dedi)
+        private volatile bool _materializationInProgress = false; // Защита от параллельных вызовов материализации
         private bool _isInitialized = false; // Флаг инициализации
         private bool _simulationStarted = false; // Флаг запуска симуляции (для отложенного старта)
 
@@ -207,20 +208,36 @@ namespace GalacticExpansion
                 {
                     // ==== DEDI ПРОЦЕСС ====
                     
-                    // Материализация виртуальных колоний (retry-логика с проверкой готовности playfield).
-                    // EnsurePlayfieldColoniesSpawnedAsync помечает колонии (PendingMaterialization=true),
-                    // а TryMaterializePendingColoniesAsync выполняет фактический спавн через IPC.
-                    // Guard: вызываем только после старта симуляции, чтобы _simulationState уже был инициализирован
-                    // и не спамить LoadAsync() -> "State file not found" до старта.
-                    if (_simulationStarted && _colonyManager != null)
+                    // Материализация виртуальных колоний через IPC (fire-and-forget на ThreadPool).
+                    // КРИТИЧНО: НЕ вызывать .GetAwaiter().GetResult() — это вызывает deadlock!
+                    // Continuation от await внутри TryMaterializePendingColoniesAsync захватывает
+                    // SynchronizationContext (Unity) и пытается вернуться на main thread,
+                    // который заблокирован GetResult(). Результат — deadlock навсегда.
+                    //
+                    // Throttle: не чаще раза в 3 секунды, чтобы не спамить IPC-запросами.
+                    // Guard _materializationInProgress: защита от параллельных Task.Run.
+                    if (_simulationStarted && _colonyManager != null && !_materializationInProgress)
                     {
-                        try
+                        var now = DateTime.UtcNow;
+                        if ((now - _lastMaterializationAttempt).TotalSeconds >= 3.0)
                         {
-                            _colonyManager.TryMaterializePendingColoniesAsync().GetAwaiter().GetResult();
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.Debug($"[Dedi] Materialization check: {ex.Message}");
+                            _lastMaterializationAttempt = now;
+                            _materializationInProgress = true;
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await _colonyManager.TryMaterializePendingColoniesAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger?.Debug($"[Dedi] Materialization check: {ex.Message}");
+                                }
+                                finally
+                                {
+                                    _materializationInProgress = false;
+                                }
+                            });
                         }
                     }
                     
