@@ -3,46 +3,53 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Eleon.Modding;
 using GalacticExpansion.Core.IPC;
+using GalacticExpansion.Core.Placement;
 using GalacticExpansion.Models;
 using NLog;
 
 namespace GalacticExpansion.Core.Spawning
 {
     /// <summary>
-    /// IPC-aware EntitySpawner wrapper для правильной работы в multi-process архитектуре Empyrion.
+    /// IPC-aware EntitySpawner для правильной работы в multi-process архитектуре Empyrion.
     /// 
-    /// КРИТИЧЕСКИ ВАЖНО:
-    /// - В Dedi процессе (ApplicationMode.DedicatedServer): отправляет IPC команды в PfServer через NetworkBridge
-    /// - В PfServer процессе (ApplicationMode.PlayfieldServer): использует прямой EntitySpawner для spawn
+    /// АРХИТЕКТУРНОЕ ПРАВИЛО:
+    /// - Dedi процесс НЕ имеет _directSpawner! Спавн через ModAPI Gateway на Dedi не работает
+    ///   (Empyrion отвечает Event_Ok без entity ID). Все spawn-операции на Dedi идут ТОЛЬКО через IPC к PfServer.
+    /// - PfServer процесс использует _directSpawner для прямого spawn через ModAPI.
     /// 
-    /// Это решает проблему "PlayfieldConnectionNotFound" т.к. spawn операции выполняются в правильном процессе.
+    /// На Dedi доступен только IPlacementResolver (определение terrain height) и NetworkBridge (IPC).
+    /// EntitySpawner на Dedi намеренно отсутствует, чтобы исключить случайный вызов спавна через Gateway.
     /// </summary>
     public class IPCEntitySpawner : IEntitySpawner
     {
-        private readonly IEntitySpawner _directSpawner; // Для PfServer процесса
-        private readonly NetworkBridge? _networkBridge; // Для Dedi процесса (IPC)
+        // На Dedi = null! Спавн через ModAPI Gateway на Dedi запрещён архитектурно.
+        private readonly IEntitySpawner? _directSpawner;
+        private readonly NetworkBridge? _networkBridge; // Для Dedi процесса (IPC к PfServer)
+        private readonly IPlacementResolver? _placementResolver; // Для Dedi: определение terrain height
         private readonly ApplicationMode _processMode;
         private readonly ILogger _logger;
 
         /// <summary>
-        /// Конструктор для Dedi процесса (с NetworkBridge для IPC).
+        /// Конструктор для Dedi процесса: IPC через NetworkBridge, terrain height через PlacementResolver.
+        /// EntitySpawner НЕ передаётся — спавн через Gateway на Dedi запрещён.
         /// </summary>
         public IPCEntitySpawner(
-            IEntitySpawner directSpawner,
             NetworkBridge networkBridge,
+            IPlacementResolver placementResolver,
             ApplicationMode processMode,
             ILogger logger)
         {
-            _directSpawner = directSpawner ?? throw new ArgumentNullException(nameof(directSpawner));
             _networkBridge = networkBridge ?? throw new ArgumentNullException(nameof(networkBridge));
+            _placementResolver = placementResolver ?? throw new ArgumentNullException(nameof(placementResolver));
+            _directSpawner = null; // Намеренно null — спавн через Gateway на Dedi не работает
             _processMode = processMode;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            _logger.Info($"IPCEntitySpawner initialized for {_processMode} mode (with NetworkBridge)");
+            _logger.Info($"IPCEntitySpawner initialized for {_processMode} mode (IPC only, no direct spawner)");
         }
 
         /// <summary>
-        /// Конструктор для PfServer процесса (без NetworkBridge, прямой spawn).
+        /// Конструктор для PfServer процесса: прямой spawn через EntitySpawner, без NetworkBridge.
         /// </summary>
         public IPCEntitySpawner(
             IEntitySpawner directSpawner,
@@ -51,6 +58,7 @@ namespace GalacticExpansion.Core.Spawning
         {
             _directSpawner = directSpawner ?? throw new ArgumentNullException(nameof(directSpawner));
             _networkBridge = null;
+            _placementResolver = null;
             _processMode = processMode;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -76,7 +84,9 @@ namespace GalacticExpansion.Core.Spawning
             }
             else if (_processMode == ApplicationMode.PlayfieldServer)
             {
-                // ==== PFSERVER ПРОЦЕСС: Прямой spawn через EntitySpawner ====
+                if (_directSpawner == null)
+                    throw new InvalidOperationException("DirectSpawner not available on PfServer — initialization error");
+
                 _logger.Debug($"[PfServer] Direct spawn: {prefabName} on {playfield}");
                 return await _directSpawner.SpawnStructureAsync(playfield, prefabName, position, rotation, factionId);
             }
@@ -144,14 +154,35 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Спавнит структуру на рельефе (находит высоту автоматически).
-        /// Делегирует к прямому spawner т.к. PlacementResolver работает в обоих процессах.
+        /// На Dedi: определяем terrain height через PlacementResolver, затем спавним через IPC (SpawnStructureAsync).
+        /// На PfServer: делегируем к _directSpawner (прямой spawn через ModAPI).
         /// </summary>
         public async Task<int> SpawnStructureAtTerrainAsync(string playfield, string prefabName, float x, float z, int factionId, float heightOffset = 0.5f)
         {
-            // PlacementResolver может работать в обоих процессах (использует IModApi для terrain height)
-            // Поэтому можем делегировать к _directSpawner который сам вызовет PlacementResolver.FindLocationAtTerrainAsync
-            // и затем вернется сюда в SpawnStructureAsync где мы уже выберем IPC или direct
-            return await _directSpawner.SpawnStructureAtTerrainAsync(playfield, prefabName, x, z, factionId, heightOffset);
+            if (_processMode == ApplicationMode.DedicatedServer)
+            {
+                // Dedi: определяем позицию локально через PlacementResolver, затем спавним через IPC
+                if (_placementResolver == null)
+                    throw new InvalidOperationException("PlacementResolver not available on Dedi — initialization error");
+
+                _logger.Debug($"[Dedi] Finding terrain position for '{prefabName}' at ({x}, {z}) on '{playfield}'");
+                var terrainPos = await _placementResolver.FindLocationAtTerrainAsync(playfield, x, z, heightOffset);
+                _logger.Debug($"[Dedi] Terrain position resolved: {terrainPos}");
+
+                // SpawnStructureAsync на Dedi пойдёт через SpawnViaIPCAsync → NetworkBridge → PfServer
+                return await SpawnStructureAsync(playfield, prefabName, terrainPos, new Vector3(0, 0, 0), factionId);
+            }
+            else if (_processMode == ApplicationMode.PlayfieldServer)
+            {
+                if (_directSpawner == null)
+                    throw new InvalidOperationException("DirectSpawner not available on PfServer — initialization error");
+
+                return await _directSpawner.SpawnStructureAtTerrainAsync(playfield, prefabName, x, z, factionId, heightOffset);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported process mode: {_processMode}");
+            }
         }
 
         /// <summary>
@@ -215,7 +246,9 @@ namespace GalacticExpansion.Core.Spawning
             }
             else if (_processMode == ApplicationMode.PlayfieldServer)
             {
-                // ==== PFSERVER ПРОЦЕСС: Прямой spawn через EntitySpawner ====
+                if (_directSpawner == null)
+                    throw new InvalidOperationException("DirectSpawner not available on PfServer — initialization error");
+
                 _logger.Debug($"[PfServer] Direct NPC spawn: {npcClassName} on {playfield}");
                 return await _directSpawner.SpawnNPCAtTerrainAsync(playfield, npcClassName, x, z, factionName);
             }
@@ -279,28 +312,37 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Уничтожает сущность по EntityId.
+        /// На Dedi — запрещено (нет _directSpawner), на PfServer — делегируем к _directSpawner.
         /// </summary>
         public async Task DestroyEntityAsync(int entityId)
         {
-            // Destroy можно делегировать к directSpawner т.к. Request_Entity_Destroy работает в обоих процессах
+            if (_directSpawner == null)
+                throw new InvalidOperationException("DestroyEntityAsync is not supported on Dedi — route through IPC");
+
             await _directSpawner.DestroyEntityAsync(entityId);
         }
 
         /// <summary>
         /// Уничтожает несколько сущностей пакетом.
+        /// На Dedi — запрещено, на PfServer — делегируем к _directSpawner.
         /// </summary>
         public async Task<int> DestroyEntitiesAsync(IEnumerable<int> entityIds)
         {
-            // Batch destroy делегируем к directSpawner
+            if (_directSpawner == null)
+                throw new InvalidOperationException("DestroyEntitiesAsync is not supported on Dedi — route through IPC");
+
             return await _directSpawner.DestroyEntitiesAsync(entityIds);
         }
 
         /// <summary>
         /// Проверяет существование сущности по EntityId.
+        /// На Dedi — запрещено, на PfServer — делегируем к _directSpawner.
         /// </summary>
         public async Task<bool> EntityExistsAsync(int entityId)
         {
-            // EntityExists делегируем к directSpawner
+            if (_directSpawner == null)
+                throw new InvalidOperationException("EntityExistsAsync is not supported on Dedi — route through IPC");
+
             return await _directSpawner.EntityExistsAsync(entityId);
         }
 

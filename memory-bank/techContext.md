@@ -69,10 +69,14 @@ BaseMax: RequiredResources=10000, ProductionRate=300, MinTime=14400s
 ### Dedi процесс:
 ```
 IMod.Init → InitializeGatewayAndModulesForDedi
+  → PlacementResolver (terrain height)
+  → IPCEntitySpawner(networkBridge, placementResolver, Dedi, logger) — БЕЗ EntitySpawner!
   → регистрация модулей → SimulationEngine.StartAsync() [немедленно]
   → _simulationStarted = true → SetSimulationState(_state)
 NetworkBridge.OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync
 Game_Update (guard _simulationStarted) → Task.Run(TryMaterialize) [throttle 3s]
+  → IPCEntitySpawner.SpawnStructureAtTerrainAsync
+    → PlacementResolver (terrain pos) → SpawnViaIPCAsync → NetworkBridge → PfServer
 ```
 
 ### PfServer процесс:
@@ -81,6 +85,10 @@ OnPlayfieldLoaded → IPlayfield → NativePlayfieldSpawner
   → NetworkBridge.SendNotificationToDedi(PlayfieldReadyNotification) [retry 3×500ms]
 NetworkBridge → HandleIPCRequestWithNativeSpawner
 ```
+
+### КРИТИЧНО: EntitySpawner на Dedi ЗАПРЕЩЁН
+Спавн через ModAPI Gateway на Dedi не работает (Event_Ok без entity ID).
+IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlacementResolver + NetworkBridge.
 
 ## Threading Model (КРИТИЧНО!)
 

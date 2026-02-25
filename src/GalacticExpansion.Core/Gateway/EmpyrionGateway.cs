@@ -210,16 +210,24 @@ namespace GalacticExpansion.Core.Gateway
         }
 
         /// <summary>
-        /// Пытается завершить ожидающий ответ с использованием рефлексии
+        /// Пытается завершить ожидающий ответ с использованием рефлексии.
+        /// ВАЖНО: data может быть null при Event_Ok от Empyrion (например, для Request_Entity_Spawn).
+        /// В этом случае мы не можем определить тип через рефлексию и возвращаем false,
+        /// чтобы событие было обработано как broadcast (не как response).
         /// </summary>
         private bool TryCompleteResponse(ushort seqNr, object data)
         {
             try
             {
-                // Получаем тип данных
+                // Event_Ok от Empyrion приходит с data = null — рефлексия невозможна
+                if (data == null)
+                {
+                    Logger.Debug($"TryCompleteResponse: data is null for SeqNr {seqNr} (likely Event_Ok), skipping");
+                    return false;
+                }
+
                 var dataType = data.GetType();
                 
-                // Вызываем CompleteResponse<T> с правильным типом через рефлексию
                 var method = typeof(SequenceManager).GetMethod(nameof(SequenceManager.CompleteResponse));
                 var genericMethod = method?.MakeGenericMethod(dataType);
                 var result = genericMethod?.Invoke(_sequenceManager, new[] { seqNr, data });

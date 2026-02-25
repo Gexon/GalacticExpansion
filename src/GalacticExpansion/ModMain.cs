@@ -537,7 +537,7 @@ namespace GalacticExpansion
                 };
 
                 // Инициализируем базовые компоненты (Gateway, StateStore, EventBus, ModuleRegistry)
-                // НО НЕ создаем EntitySpawner и зависимые модули!
+                // EntitySpawner на Dedi НЕ создаётся — спавн идёт ТОЛЬКО через IPC к PfServer
                 InitializeGatewayAndModulesForDedi(modAPI);
 
                 // Поздняя инъекция IModApi в PlacementResolver
@@ -556,7 +556,7 @@ namespace GalacticExpansion
 
         /// <summary>
         /// Инициализация Gateway и модулей специально для Dedi процесса.
-        /// Создает IPCEntitySpawner вместо обычного EntitySpawner ДО создания StageManager и других модулей!
+        /// Создает IPCEntitySpawner (без EntitySpawner!) ДО создания StageManager и других модулей.
         /// </summary>
         private void InitializeGatewayAndModulesForDedi(IModApi modAPI)
         {
@@ -652,25 +652,25 @@ namespace GalacticExpansion
                 logger.Info("StructureTracker registered");
                 
                 // ===== КРИТИЧНО: Создаем IPCEntitySpawner ДО StageManager/ColonyManager =====
-                logger.Info("Creating IPCEntitySpawner for Dedi process...");
+                // АРХИТЕКТУРНОЕ ПРАВИЛО: На Dedi EntitySpawner НЕ создаётся!
+                // Спавн через ModAPI Gateway на Dedi не работает (Empyrion отвечает Event_Ok без entity ID).
+                // Все spawn-операции идут ТОЛЬКО через IPC к PfServer.
+                logger.Info("Creating IPCEntitySpawner for Dedi process (IPC only, no EntitySpawner)...");
                 
-                // PlacementResolver
+                // PlacementResolver — работает на Dedi через IModApi для определения terrain height
                 var placementResolver = new PlacementResolver(_gateway, playerTracker, logger, modAPI);
                 _container.Register<IPlacementResolver>(placementResolver);
                 logger.Info("PlacementResolver registered");
                 
-                // Сначала создаем обычный EntitySpawner (для делегирования в PfServer)
-                var directSpawner = new EntitySpawner(_gateway, placementResolver, logger);
-                
-                // Оборачиваем в IPCEntitySpawner (для Dedi он отправляет IPC команды)
+                // IPCEntitySpawner для Dedi: NetworkBridge + PlacementResolver, БЕЗ EntitySpawner
                 var ipcSpawner = new IPCEntitySpawner(
-                    directSpawner,
-                    _networkBridge, // NetworkBridge уже создан!
+                    _networkBridge, // IPC к PfServer
+                    placementResolver, // Terrain height на Dedi
                     ApplicationMode.DedicatedServer,
                     logger
                 );
                 _container.Register<IEntitySpawner>(ipcSpawner);
-                logger.Info("✅ IPCEntitySpawner registered (will use IPC for all spawn operations)");
+                logger.Info("✅ IPCEntitySpawner registered (IPC only, EntitySpawner excluded from Dedi)");
                 
                 // Теперь создаем модули которые используют IEntitySpawner - они получат IPCEntitySpawner!
                 var economySimulator = new EconomySimulator(_config, logger);

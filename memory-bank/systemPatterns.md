@@ -88,6 +88,20 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
 
+### ЗАПРЕТ на EntitySpawner в Dedi процессе (Phase 3.5)
+
+**Принцип:** На Dedi `EntitySpawner` НЕ создаётся и НЕ используется. Спавн через ModAPI Gateway на Dedi не работает — Empyrion отвечает `Event_Ok` без entity ID.
+
+**Архитектура IPCEntitySpawner:**
+- **Dedi-конструктор:** `(NetworkBridge, IPlacementResolver, ApplicationMode, ILogger)` — без IEntitySpawner
+- **PfServer-конструктор:** `(IEntitySpawner, ApplicationMode, ILogger)` — без NetworkBridge
+- На Dedi `_directSpawner = null`, `DestroyEntityAsync`/`EntityExistsAsync` бросают `InvalidOperationException`
+- Terrain height на Dedi через `IPlacementResolver.FindLocationAtTerrainAsync`
+
+### TryCompleteResponse: null-safe (Phase 3.5)
+
+**Принцип:** `EmpyrionGateway.TryCompleteResponse` проверяет `data == null` перед `data.GetType()`. Event_Ok от Empyrion приходит с null data — рефлексия невозможна, возвращаем false.
+
 ## Важные инварианты
 
 1. **In-memory state — единственный источник правды** во время работы симуляции.
@@ -98,7 +112,9 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 6. **Throttle + guard** обязательны для fire-and-forget из Game_Update.
 7. `SeqNr` уникальны и корректно сопоставляются.
 8. Rate limiting обязателен для ModAPI запросов (только Dedi).
-9. Спавн в Dedi через `IPCEntitySpawner`, в PfServer через `NativePlayfieldSpawner`.
-10. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
-11. **Multi-process:** Spawn работает только из PfServer процесса.
-12. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
+9. **ЗАПРЕЩЕНО** `EntitySpawner` на Dedi! Только `IPCEntitySpawner(NetworkBridge, IPlacementResolver)`.
+10. В PfServer спавн через `NativePlayfieldSpawner` или `_directSpawner`.
+11. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
+12. **Multi-process:** Spawn работает ТОЛЬКО из PfServer процесса.
+13. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
+14. **TryCompleteResponse:** `data == null` → return false (Event_Ok).
