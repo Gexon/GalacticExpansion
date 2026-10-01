@@ -3,38 +3,30 @@
 ## Текущее состояние
 
 **Дата обновления:** 01.10.2026  
-**Фаза:** IPC-канал доставляет пакеты, JSON разбирается по полю `type`. Следующий скоуп — прогон материализации на dedicated.
+**Фаза:** Материализация на dedicated подтверждена в игре. `BA_ZiraxOutpost` спавнится. Структура висит над землёй: высота на Dedi — запасные 100 м плюс отступ 10 м.
 
-## Последние изменения (01.10.2026) — канал INetwork
+## Последние изменения (01.10.2026) — спавн префаба
 
-Пакеты Dedi ↔ PfServer доходят. Логи `logs-2006-10-01_v5`, 18:30: обе стороны пишут `Received packet from 'GalacticExpansion'`.
+Логи `logs-2006-10-01_v7`: IPC доходит, `SpawnPrefab("BA_Zirax_Medium_1")` возвращает `EntityId=-1`. Такого файла в `Content/Prefabs` нет. Имя бралось не из правки пользователя, а из дефолта `ConfigurationLoader`, потому что в JSON не было `Zirax.Stages`.
 
-Игра (`Eleon.ModBridge.NetworkBridge` в `Assembly-CSharp.dll`) кладёт колбэк под `Assembly.GetCallingAssembly().GetName().Name`. Имя из yaml и папка мода не используются. `Send*(receiver)` ищет этот ключ через `TryGetValue`. Нет ключа — колбэк не вызывается, игра молчит, а `Send*` всё равно может вернуть `true`.
+`Configuration` сериализуется с `MemberSerialization.OptIn`. Секции `Prefabs`, `ColonyEvolution`, `Economy`, `ThreatDirector`, `Hostility`, `Advanced` загрузчик отбрасывает. Ключи `LandingPad` / `MediumBase` не совпадают с `ColonyStage` (`ConstructionYard`, `BaseL1`…`BaseMax`).
 
-Вызов из `GalacticExpansion.Core.dll` регистрировал канал `GalacticExpansion.Core` при `receiver` `"GalacticExpansion"`. Исправление: единственная точка вызова — `EmpyrionModChannel` в сборке `GalacticExpansion.dll` (`NoInlining`, отдельный кадр стека). `NetworkBridge` ходит только через `IEmpyrionModChannel`.
+В `config/Configuration.json` добавлен `Zirax` со стадиями на `BA_ZiraxOutpost` и аванпостами `BA_ZiraxSkyminer`. Блок `Prefabs` удалён. Тот же файл скопирован в `Content/Mods/GalacticExpansion/`. Игрок видит заспавненный `BA_ZiraxOutpost`.
 
-`DeserializeMessage` больше не вызывает `DeserializeObject<IPCMessage>`. `JObject` читает поле `type`, затем создаётся конкретный класс. В логе v5 падение было на `Path 'pf'`: это первое поле наследника, не битый JSON. Unit-тесты: `NetworkBridgeDeserializeTests` (4/4). На dedicated после этого фикса ещё не прогоняли: нужен ответ PfServer и EntityId.
+Высота: `OnPlayfieldLoaded` и `IPlayfield.GetTerrainHeightAt` есть только в PfServer. Кэш `PlacementResolver` на Dedi пуст, `FindLocationAtTerrainAsync` ставит Y = 100. `MaterializeColonyAsync` добавляет `heightOffset` 10. В логе точка `(0, 110, 0)`.
 
-Phase 3.5 (EntitySpawner снят с Dedi) остаётся в силе, детали в `progress.md`. Поток материализации тот же: Dedi считает позицию, спавн только через IPC на PfServer.
+Канал INetwork и разбор JSON по полю `type` остаются как в `systemPatterns.md`.
 
 ## Поток данных
 
 ```
-Инициализация Dedi:
-  InitializeGatewayAndModulesForDedi() → регистрация модулей
-  → IPCEntitySpawner(networkBridge, placementResolver, Dedi, logger) — БЕЗ EntitySpawner!
-  → Task.Run: SimulationEngine.StartAsync() → _simulationStarted = true
-  → SetSimulationState(_state) → ColonyManager получает ссылку
-
-Материализация (Dedi → IPC → PfServer):
-  StageManager.MaterializeColonyAsync
-    → IPCEntitySpawner.SpawnStructureAtTerrainAsync
-      → _placementResolver.FindLocationAtTerrainAsync (terrain height на Dedi)
-      → IPCEntitySpawner.SpawnStructureAsync → SpawnViaIPCAsync
-        → NetworkBridge → PfServer: NativePlayfieldSpawner выполняет спавн
+Dedi: MaterializeColonyAsync
+  → префаб из Zirax.Stages, где Stage == colony.Stage.ToString()
+  → PlacementResolver: Y = 100, если playfield не в кэше
+  → IPC SpawnStructure → PfServer NativePlayfieldSpawner.SpawnPrefab
 ```
 
 ## Следующие шаги
 
-1. Повторить прогон материализации на dedicated: после разбора JSON должен быть ответ PfServer и EntityId.
+1. Брать высоту рельефа на PfServer (`GetTerrainHeightAt`) и ставить структуру на землю.
 2. Phase 4: Threat Director + AIM Orchestrator.

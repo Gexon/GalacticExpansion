@@ -83,7 +83,15 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 
 ### MaterializeColonyAsync: Stage-Based Prefab (Phase 3.3)
 
-**Принцип:** При материализации спавнится префаб текущей стадии колонии из `_config.Zirax.Stages`.
+**Принцип:** При материализации спавнится префаб текущей стадии колонии из `_config.Zirax.Stages`, где `Stage` равен `colony.Stage.ToString()` (`ConstructionYard`, `BaseL1`, `BaseL2`, `BaseL3`, `BaseMax`).
+
+`PrefabName` — имя файла в `Content/Prefabs` без `.epb`. Нет файла — `SpawnPrefab` возвращает `-1`. Пустой `Zirax.Stages` загрузчик заменяет дефолтами из `ConfigurationLoader`; эти имена в ванильной игре отсутствуют.
+
+Секции вне `Configuration` (`Prefabs`, `ColonyEvolution`, `Economy`, `ThreatDirector`, `Hostility`, `Advanced`) не читаются: `MemberSerialization.OptIn`.
+
+### Высота рельефа только в PfServer (01.10.2026)
+
+`IPlayfield.GetTerrainHeightAt` есть в процессе, где сработал `OnPlayfieldLoaded`. На Dedi кэш `PlacementResolver` пуст, Y = 100 м (`DefaultTerrainHeight`) плюс `heightOffset` материализации (10 м). Структура появляется над землёй. Точную высоту нужно брать на PfServer в момент спавна.
 
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
@@ -133,3 +141,5 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 12a. **INetwork:** вызывать только из `EmpyrionModChannel` (`GalacticExpansion.dll`). Не из Core.
 13. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
 14. **TryCompleteResponse:** `data == null` → return false (Event_Ok).
+15. **Префаб стадии** только из `Zirax.Stages`. Имя должно существовать в `Content/Prefabs`.
+16. **Высота на Dedi** — fallback 100 м, пока PfServer не отдаст `GetTerrainHeightAt`.

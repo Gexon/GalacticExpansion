@@ -55,7 +55,10 @@
 - `_stateStore.SaveAsync()` — автосохранение каждые 60 сек + при shutdown
 - **ЗАПРЕЩЕНО** LoadAsync внутри тикового цикла!
 
-### Конфигурация стадий (из ConfigurationLoader, defaults)
+### Конфигурация стадий
+
+Числа баланса (и в `Zirax.Stages` рабочего конфига, и в дефолте загрузчика):
+
 ```
 ConstructionYard: RequiredResources=0, ProductionRate=100, MinTime=600s
 BaseL1: RequiredResources=1000, ProductionRate=150, MinTime=1800s
@@ -63,6 +66,8 @@ BaseL2: RequiredResources=3000, ProductionRate=200, MinTime=3600s
 BaseL3: RequiredResources=6000, ProductionRate=250, MinTime=7200s
 BaseMax: RequiredResources=10000, ProductionRate=300, MinTime=14400s
 ```
+
+Имена префабов в дефолте загрузчика (`BA_ConstructionSite`, `BA_Zirax_Small_1`, `BA_Zirax_Medium_1`, `BA_Zirax_Large_1`) в `Content/Prefabs` нет. Рабочий `config/Configuration.json`: стадии `BA_ZiraxOutpost`, аванпосты `BA_ZiraxSkyminer`. Игра читает копию в `Content/Mods/GalacticExpansion/Configuration.json`. `deploy_mod.cmd` этот файл не затирает.
 
 ## Multi-Process Architecture
 
@@ -117,5 +122,6 @@ IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlac
 
 - В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`
 - **UnityEngine.ILogger vs NLog.ILogger:** Добавлять alias при using UnityEngine
-- Дефолтные префабы колоний — ванильные (BA_ConstructionSite, BA_Zirax_*)
+- `SpawnPrefab` принимает имя без `.epb`. Нет файла — `EntityId=-1`
+- На Dedi высота рельефа — fallback 100 м; точный Y только через `IPlayfield` на PfServer
 - **IPC таймауты**: 15s структуры, 10s NPC

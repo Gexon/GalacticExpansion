@@ -3,53 +3,38 @@
 ## Текущий статус
 
 **Дата обновления:** 01.10.2026  
-**IPC-канал (GetCallingAssembly):** ✅ пакеты ходят в обе стороны (логи v5, 18:30)  
-**DeserializeMessage:** ✅ читает `type`, затем конкретный класс (unit 4/4). Прогон на dedicated ещё не сделан  
-**Phase 3.5 (Fix spawn routing):** ✅ РЕАЛИЗОВАНО  
+**IPC-канал:** ✅ пакеты Dedi ↔ PfServer (логи v5–v7)  
+**DeserializeMessage:** ✅ поле `type`, затем конкретный класс (unit 4/4). На dedicated ответ PfServer приходит  
+**Материализация структуры:** ✅ в игре виден `BA_ZiraxOutpost`. Высота запасная, база висит над землёй  
+**Phase 3.5 (Fix spawn routing):** ✅  
 **Phase 4 (Combat):** не начата
 
 ## Недавний прогресс
 
-### Phase 3.5 — Fix spawn routing: EntitySpawner выпилен из Dedi ✅
+### Спавн префаба, 01.10.2026 ✅ структура / ❌ высота
 
-**Задача:** После Phase 3.4 материализация запускалась, но структуры не спавнились из-за некорректной маршрутизации спавна.
+`SpawnPrefab` возвращает `-1`, если имени нет в `Content/Prefabs` (без `.epb`). Дефолты `ConfigurationLoader` (`BA_ConstructionSite`, `BA_Zirax_Small_1`, `BA_Zirax_Small_2`, `BA_Zirax_Medium_1`, `BA_Zirax_Large_1`, `BA_MiningOutpost_Zirax_*`) в игре отсутствуют. Подстановка срабатывает, когда `Zirax.Stages` пуст. В логе: `Zirax.Stages not in config or empty; using default`.
 
-**Баг 1: IPCEntitySpawner.SpawnStructureAtTerrainAsync обходил IPC**
-- `_directSpawner` (EntitySpawner) на Dedi отправлял `Request_Entity_Spawn` через Gateway на Dedi
-- Empyrion отвечал `Event_Ok` (null data) вместо entity ID → timeout
-- **Исправление:** EntitySpawner полностью удалён из Dedi. IPCEntitySpawner Dedi-конструктор: `(NetworkBridge, IPlacementResolver, mode, logger)`. Terrain height через PlacementResolver → SpawnStructureAsync (IPC).
+Рабочий конфиг: все стадии `BA_ZiraxOutpost`, аванпосты `BA_ZiraxSkyminer`. Проверено в игре: структура появляется. Координата Y = 110 (fallback 100 + отступ 10), XZ = 0, потому что поиск места принимает первую точку, а рельеф на Dedi не читается.
 
-**Баг 2: TryCompleteResponse NullReferenceException**
-- `data.GetType()` на null (Event_Ok с data=null) бросал NRE → SeqNr не разрешался
-- **Исправление:** `if (data == null) return false` в TryCompleteResponse
+### IPC-канал, 01.10.2026 ✅
 
-**Тесты:** 175/175 (158 unit + 17 integration) на момент Phase 3.5. После канала INetwork тесты заново не гонялись.
+Вызовы `ModApi.Network` только из `EmpyrionModChannel` (`GalacticExpansion.dll`): ключ колбэка — `GetCallingAssembly().GetName().Name`. `DeserializeMessage` читает `type` через `JObject`.
 
-### IPC-канал, 01.10.2026 ✅ доставка / ❌ разбор JSON
+### Phase 3.5 — EntitySpawner снят с Dedi ✅
 
-`RegisterReceiver*` в игре ключует колбэк именем вызывающей сборки. Вызовы перенесены в `EmpyrionModChannel` (`GalacticExpansion.dll`). В логах v5 оба процесса получают `Received packet from 'GalacticExpansion'`.
+Спавн через Gateway на Dedi даёт `Event_Ok` без entity ID. Dedi: `IPCEntitySpawner(NetworkBridge, IPlacementResolver)`. PfServer: `NativePlayfieldSpawner`. `TryCompleteResponse`: `data == null` → false.
 
-`DeserializeMessage` читает `type` через `JObject` и десериализует конкретный класс. `DeserializeObject<IPCMessage>` убран: базовый класс абстрактный, в JSON первым идёт `pf`. Тесты: `NetworkBridgeDeserializeTests`. На dedicated этот билд ещё не запускали.
+**Тесты:** 175/175 на момент Phase 3.5. После канала INetwork и правки конфига тесты заново не гонялись.
 
 ## Что работает
 
-### ✅ Phase 1-2 (Foundation & Core Loop)
+### ✅ Phase 1–3.5
 - Core Loop, Gateway (Dedi), State Store, Trackers
+- Виртуальные колонии, экономика, стадии, `MaterializeColonyAsync`
+- IPC: `PlayfieldReadyNotification`, `SpawnStructure` → `IPlayfield.SpawnPrefab`
+- Дедлок `Game_Update` снят (`Task.Run`, throttle 3 с)
 
-### ✅ Phase 3 (Domain)
-- Spawning & Evolution: EntitySpawner (PfServer only!), StageManager
-- Placement: PlacementResolver
-- Economy: EconomySimulator, UnitEconomyManager
-- Colony Management: ColonyManager, Colony Virtualization
+## Известная проблема
 
-### ✅ Phase 3.1-3.3 (Native Spawner, Colony Spawn, Materialization)
-- NativePlayfieldSpawner, IPC PlayfieldReadyNotification, MaterializeColonyAsync
-
-### ✅ Phase 3.4 (Fix deadlock + IPC reliability)
-- Task.Run() вместо .GetAwaiter().GetResult() + throttle 3s
-- Retry 3×500ms в SendNotificationToDedi
-
-### ✅ Phase 3.5 (Fix spawn routing)
-- EntitySpawner полностью выпилен из Dedi
-- IPCEntitySpawner: Dedi = (NetworkBridge + IPlacementResolver), PfServer = (_directSpawner)
-- TryCompleteResponse: null-check для Event_Ok
+Структура спавнится над землёй. Высоту рельефа нужно снимать в PfServer перед `SpawnPrefab`.

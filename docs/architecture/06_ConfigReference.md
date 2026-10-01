@@ -1,8 +1,8 @@
 # Справочник конфигурации GalacticExpansion (GLEX)
 
 **Версия:** 1.0  
-**Дата:** 24.01.2026  
-**Статус:** Утверждено
+**Дата:** 01.10.2026  
+**Статус:** Сверено с `ConfigurationLoader` и прогоном спавна на dedicated
 
 ---
 
@@ -19,6 +19,17 @@
 - Конфигурация читается **при старте мода**
 - Для применения изменений требуется **перезапуск сервера**
 - Невалидные значения заменяются на **значения по умолчанию** с записью в лог
+- Игра открывает файл в папке мода. Репозиторный `config/Configuration.json` сам по себе на сервер не попадает. `deploy_mod.cmd` уже лежащий в моде `Configuration.json` не перезаписывает
+
+### 1.3 Что загрузчик читает
+
+Класс `Configuration` помечен `MemberSerialization.OptIn`. В объект попадают только свойства с `[JsonProperty]`: `Version`, `LogLevel`, `Simulation`, `HomePlayfield`, `EnableExpansion`, `Limits`, `Zirax`, `AIM`, `Placement`, `Threat`, `Expansion`, `UnitEconomy`.
+
+Остальной JSON молча отбрасывается. На спавн не влияют секции `Prefabs`, `ColonyEvolution`, `Economy`, `ThreatDirector`, `Hostility`, `Advanced`. Поле `EmpyrionPath` нужно скрипту деплоя, мод его не читает.
+
+Имена вроде `LandingPad`, `Outpost`, `SmallBase`, `MediumBase`, `LargeBase`, `Fortress` стадиями колонии не являются. Спавнер сравнивает `Zirax.Stages[].Stage` со значением enum `ColonyStage`: `ConstructionYard`, `BaseL1`, `BaseL2`, `BaseL3`, `BaseMax`.
+
+Если `Zirax` отсутствует или `Zirax.Stages` пуст, `ConfigurationLoader` подставляет встроенный список и пишет в лог `Zirax.Stages not in config or empty; using default`. Имена этого списка (`BA_ConstructionSite`, `BA_Zirax_Small_1`, `BA_Zirax_Small_2`, `BA_Zirax_Medium_1`, `BA_Zirax_Large_1`, `BA_MiningOutpost_Zirax_1`, `BA_MiningOutpost_Zirax_2`) в `Content/Prefabs` нет. `IPlayfield.SpawnPrefab` тогда возвращает `EntityId=-1`.
 
 ---
 
@@ -186,8 +197,8 @@
 ```json
 "DropShips": [
   {
-    "PrefabName": "GLEX_DropShip_T1",
-    "Type": "SV",
+    "PrefabName": "BA_ZiraxOutpost",
+    "Type": "BA",
     "SpawnAltitude": 500.0,
     "FlightDurationSeconds": 30
   }
@@ -207,21 +218,23 @@
 ```json
 "Stages": [
   {
-    "Stage": "BaseL1",
-    "PrefabName": "GLEX_Base_L1",
-    "RequiredResources": 1000,
-    "ProductionRate": 150.0,
-    "MinTimeSeconds": 1800
+    "Stage": "BaseL3",
+    "PrefabName": "BA_ZiraxOutpost",
+    "RequiredResources": 6000,
+    "ProductionRate": 250.0,
+    "MinTimeSeconds": 7200
   }
 ]
 ```
 
 **Поля Stage:**
-- `Stage` (String) — имя стадии: `ConstructionYard`, `BaseL1`, `BaseL2`, `BaseL3`, `BaseMax`
-- `PrefabName` (String) — имя префаба структуры
+- `Stage` (String) — имя стадии: `ConstructionYard`, `BaseL1`, `BaseL2`, `BaseL3`, `BaseMax`. Другая строка не совпадёт с `colony.Stage.ToString()`, и спавн уйдёт в запасной `BA_ConstructionSite`
+- `PrefabName` (String) — имя файла в `Content/Prefabs` **без** расширения `.epb`. Проверенный на dedicated пример: `BA_ZiraxOutpost`. Рядом в игре есть `BA_ZiraxTradeOutpost`, `BA_ZiraxDroneBase`, `BA_ZiraxCapitalCity`, `BA_ZiraxSkyminer`
 - `RequiredResources` (Float) — необходимое количество виртуальных ресурсов для перехода
 - `ProductionRate` (Float) — скорость производства ресурсов в час
 - `MinTimeSeconds` (Integer) — минимальное время в стадии (секунды)
+
+`SpawnPrefab` не ищет префаб по диску заранее. Несуществующее имя даёт `EntityId=-1` и повтор материализации. Высоту рельефа dedicated не знает: в прогоне 01.10.2026 структура появилась в точке `(0, 110, 0)`, над землёй.
 
 **Балансировка:**
 - Увеличение `RequiredResources` → медленнее развитие
@@ -236,7 +249,7 @@
 "ResourceOutposts": [
   {
     "Type": "Iron",
-    "PrefabName": "GLEX_Miner_Iron",
+    "PrefabName": "BA_ZiraxSkyminer",
     "ProductionRate": 75.0
   }
 ]
@@ -541,10 +554,13 @@ BaseL2: BaseRate = 3.5/час
   },
   
   "Zirax": {
+    "FactionId": 2,
     "Stages": [
-      {"Stage": "ConstructionYard", "RequiredResources": 0, "ProductionRate": 100, "MinTimeSeconds": 600},
-      {"Stage": "BaseL1", "RequiredResources": 1000, "ProductionRate": 150, "MinTimeSeconds": 1800},
-      {"Stage": "BaseL2", "RequiredResources": 3000, "ProductionRate": 200, "MinTimeSeconds": 3600}
+      {"Stage": "ConstructionYard", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 0, "ProductionRate": 100, "MinTimeSeconds": 600},
+      {"Stage": "BaseL1", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 1000, "ProductionRate": 150, "MinTimeSeconds": 1800},
+      {"Stage": "BaseL2", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 3000, "ProductionRate": 200, "MinTimeSeconds": 3600},
+      {"Stage": "BaseL3", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 6000, "ProductionRate": 250, "MinTimeSeconds": 7200},
+      {"Stage": "BaseMax", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 10000, "ProductionRate": 300, "MinTimeSeconds": 14400}
     ]
   }
 }
@@ -563,7 +579,7 @@ BaseL2: BaseRate = 3.5/час
   
   "Zirax": {
     "Stages": [
-      {"Stage": "BaseL1", "RequiredResources": 500, "ProductionRate": 200, "MinTimeSeconds": 900}
+      {"Stage": "BaseL1", "PrefabName": "BA_ZiraxOutpost", "RequiredResources": 500, "ProductionRate": 200, "MinTimeSeconds": 900}
     ]
   },
   
@@ -604,37 +620,31 @@ BaseL2: BaseRate = 3.5/час
 
 ### 4.1 Правила валидации
 
-**При загрузке конфигурации:**
-1. Проверка JSON синтаксиса
-2. Проверка обязательных полей
-3. Проверка диапазонов значений
-4. Проверка существования prefab'ов (warning если не найдены)
+**При загрузке конфигурации (`ConfigurationLoader.Load`):**
+1. Нет файла — создаётся дефолт и записывается на диск
+2. Битый JSON — в лог уходит ошибка, поднимается дефолт целиком
+3. Пустой `Zirax.Stages` — подставляются встроенные стадии (их `PrefabName` в игре нет, см. §1.3)
+4. `Limits.MaxRequestsPerSecond <= 0` → 10
+5. `Simulation.TickIntervalMs < 100` → 100
 
-**При невалидных значениях:**
+Существование файла префаба загрузчик **не** проверяет. Ошибка видна только в момент `SpawnPrefab` (`EntityId=-1`).
+
+**При невалидных значениях из списка выше:**
 - Замена на значение по умолчанию
-- Запись warning в лог
+- Запись в лог
 - Продолжение работы
 
-### 4.2 Пример валидации
+### 4.2 Что делает ConfigurationLoader
+
+Подстановка стадий — в `Load`, до `ValidateConfiguration`:
 
 ```csharp
-public class ConfigurationValidator
+if (config.Zirax == null || config.Zirax.Stages == null || config.Zirax.Stages.Count == 0)
 {
-    public void Validate(Configuration config)
-    {
-        // Проверка Limits
-        if (config.Limits.MaxColoniesPerPlayfield < 1)
-        {
-            _logger.LogWarning("MaxColoniesPerPlayfield < 1, using default: 1");
-            config.Limits.MaxColoniesPerPlayfield = 1;
-        }
-        
-        // Проверка Stages
-        if (!config.Zirax.Stages.Any())
-        {
-            _logger.LogError("No stages defined, using default stages");
-            config.Zirax.Stages = GetDefaultStages();
-        }
-    }
+    config.Zirax.Stages = CreateDefaultConfiguration().Zirax.Stages;
+    Logger.Info("Zirax.Stages not in config or empty; using default");
 }
+```
+
+`ValidateConfiguration` трогает только два порога: `MaxRequestsPerSecond <= 0` становится 10, `TickIntervalMs < 100` становится 100. Проверки `MaxColoniesPerPlayfield` и наличия файла префаба в загрузчике нет.
 ```
