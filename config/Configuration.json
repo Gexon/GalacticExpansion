@@ -18,6 +18,72 @@
     "MaxResourceOutposts": 3,
     "MaxAIMCommandsPerMinute": 10
   },
+  "Zirax": {
+    "FactionId": 2,
+    "DropShips": [
+      {
+        "PrefabName": "BA_ZiraxOutpost",
+        "Type": "BA",
+        "SpawnAltitude": 500,
+        "FlightDurationSeconds": 30
+      }
+    ],
+    "Stages": [
+      {
+        "Stage": "ConstructionYard",
+        "PrefabName": "BA_ZiraxOutpost",
+        "RequiredResources": 0,
+        "ProductionRate": 100,
+        "MinTimeSeconds": 600
+      },
+      {
+        "Stage": "BaseL1",
+        "PrefabName": "BA_ZiraxOutpost",
+        "RequiredResources": 1000,
+        "ProductionRate": 150,
+        "MinTimeSeconds": 1800
+      },
+      {
+        "Stage": "BaseL2",
+        "PrefabName": "BA_ZiraxOutpost",
+        "RequiredResources": 3000,
+        "ProductionRate": 200,
+        "MinTimeSeconds": 3600
+      },
+      {
+        "Stage": "BaseL3",
+        "PrefabName": "BA_ZiraxOutpost",
+        "RequiredResources": 6000,
+        "ProductionRate": 250,
+        "MinTimeSeconds": 7200
+      },
+      {
+        "Stage": "BaseMax",
+        "PrefabName": "BA_ZiraxOutpost",
+        "RequiredResources": 10000,
+        "ProductionRate": 300,
+        "MinTimeSeconds": 14400
+      }
+    ],
+    "ResourceOutposts": [
+      {
+        "Type": "Iron",
+        "PrefabName": "BA_ZiraxSkyminer",
+        "ProductionRate": 75
+      },
+      {
+        "Type": "Copper",
+        "PrefabName": "BA_ZiraxSkyminer",
+        "ProductionRate": 50
+      }
+    ],
+    "Guards": [
+      {
+        "Type": "ZiraxMale",
+        "Count": 5
+      }
+    ]
+  },
   "ColonyEvolution": {
     "TriggerPlayerPresenceSeconds": 0,
     "StageDurations": {
@@ -207,28 +273,6 @@
       "DroneBaseBonus": 1.0,
       "UnderAttackPenalty": -0.3
     }
-  },
-  "Prefabs": {
-    "ColonyStages": {
-      "LandingPad": "BA_ConstructionSite",
-      "Outpost": "BA_Zirax_Small_1",
-      "SmallBase": "BA_Zirax_Small_2",
-      "MediumBase": "BA_Zirax_Medium_1",
-      "LargeBase": "BA_Zirax_Large_1",
-      "Fortress": "BA_Zirax_Fortress_1"
-    },
-    "ResourceOutposts": [
-      "BA_MiningOutpost_Zirax_1",
-      "BA_MiningOutpost_Zirax_2"
-    ],
-    "LogisticsVessels": [
-      "CV_Freighter_Zirax_1",
-      "CV_Cargo_Zirax_1"
-    ],
-    "PatrolVessels": [
-      "CV_Patrol_Zirax_1",
-      "CV_Patrol_Zirax_2"
-    ]
   },
   "Advanced": {
     "EnableVerboseLogging": false,

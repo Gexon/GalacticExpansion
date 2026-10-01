@@ -1,0 +1,43 @@
+C:\Program Files (x86)\Steam\steamapps\common\Empyrion - Galactic Survival\Content\Prefabs
+
+ZiraxCapitalCity — столица фракции Зиракс.
+ZiraxCouncilOfElders — Совет старейшин (Council of Elders) — орган управления Зиракс.
+ZiraxEmpressPalace — дворец императрицы (Empress Palace) — ключевая точка на родной планете фракции.
+ZiraxMasperon — название миссии или объекта, связанного с Зиракс.
+ZiraxOutpost — аванпост Зиракс.
+ZiraxPalaceBarracks — казармы во дворце.
+ZiraxPalaceDefence1 / Defence2 — элементы оборонительной системы дворца.
+ZiraxSkyminer — объект или миссия, связанная с добычей ресурсов в космосе.
+ZiraxTradeOutpost — торговый пост.
+
+BA_MasperonZiraxMission
+BA_ZiraxCapitalCity
+BA_ZiraxCouncilOfElders
+BA_ZiraxDroneBase
+BA_ZiraxEmpressPalace
+BA_ZiraxMasperon
+BA_ZiraxOutpost
+BA_ZiraxPalaceBarracks
+BA_ZiraxPalaceDefence1
+BA_ZiraxPalaceDefence2
+BA_ZiraxSkyminer
+BA_ZiraxTradeOutpost
+
+BAF_ZiraxDionStation
+
+BAO_ZiraxCommonSat
+BAO_ZiraxCommonSat2
+BAO_ZiraxCommonSat3
+BAO_ZiraxExplorationSat
+BAO_ZiraxExplorationSat2
+BAO_ZiraxGasRefinery_V1
+BAO_ZiraxGasRefinery
+BAO_ZiraxMilitarySat
+BAO_ZiraxProduction
+BAO_ZiraxRefinery
+BAO_ZiraxScienceSat
+BAO_ZiraxScienceSat2
+BAO_ZiraxSecuritySat
+BAO_ZiraxShipyard
+BAO_ZiraxSolarArray
+BAO_ZiraxSupplyStation
