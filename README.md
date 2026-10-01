@@ -55,123 +55,78 @@
 
 ## 📋 Статус проекта
 
-**Текущая фаза:** Документация готова, кофе выпит, код скоро польётся 💻  
-**Дата:** 29.01.2026  
-**Следующий шаг:** Начало разработки (Phase 1: Foundation).
+**Дата:** 01.10.2026  
+**Фаза:** 1–3.5 в коде. Следующий шаг — прогон материализации на dedicated, затем Phase 4 (бой).
 
-### 🎯 Новые функции (29.01.2026)
+Симуляция живёт в dedicated-процессе. Физический спавн структур идёт только в процессе playfield-сервера, через IPC. Канал `INetwork` доставляет пакеты в обе стороны: ключ колбэка в игре — имя вызывающей сборки, поэтому вызовы `ModApi.Network` сидят в `EmpyrionModChannel` (`GalacticExpansion.dll`). Разбор входящего JSON идёт по полю `type`, затем создаётся конкретный класс сообщения.
 
-**Добавлена система "Most Wanted" — Охота на врага колонии** 🎯  
-*Слишком много навредили Zirax? Теперь они придут к вам домой. Буквально.*
+Материализацию на dedicated после фикса разбора JSON ещё не прогоняли. Нужен ответ PfServer и `EntityId`.
 
-- ✅ Система отслеживания враждебности игроков (кто нас больше всех достаёт)
-- ✅ 6 рангов враждебности — от "Неизвестный" до "Геноцидер" (да, это вы)
-- ✅ Целенаправленная охота на самого опасного **ОНЛАЙН** игрока (оффлайн не спасёт!)
-- ✅ Затухание враждебности **только при смерти** (-5% за раз, умирайте чаще! 😈)
-- ✅ Целевая экспансия на **родную планету** топового врага (месть на дому!)
-- ✅ Адаптивная защита: чем выше ранг, тем сильнее реакция (просили вызов — получите!)
+### Уже в коде
 
-### 🎉 Недавние обновления
+- ✅ Ядро симуляции, шлюз ModAPI, хранение `state.json`, трекеры игроков и структур
+- ✅ Виртуальные колонии: развиваются в памяти, материализуются при готовности playfield
+- ✅ Экономика и производство юнитов
+- ✅ Поиск места и высота рельефа, стадии базы (префаб текущей стадии)
+- ✅ Спавн: на Dedi только `IPCEntitySpawner`, на PfServer — `NativePlayfieldSpawner`
+- ✅ Unit- и интеграционные тесты (xUnit)
 
-**29.01.2026 — Система "Most Wanted"** 🎯  
-*Zirax теперь умеют держать обиды и планировать месть!*
-- ✅ Создан новый модуль **Hostility Tracker** (следим за обидчиками)
-- ✅ Обновлены модули: **Threat Director**, **Colony Evolution**, **Player Tracker**
-- ✅ Полная интеграция системы охоты и целевой экспансии (добро пожаловать в их список!)
+### Ещё в спецификации
 
-**28.01.2026 — Новые возможности API v1.15** 🔥  
-*Декомпилировали Empyrion ModAPI v1.15 и нашли золото!*
-
-После долгих вечеров с декомпилятором обнаружены критически важные новые возможности:
-
-- ✅ **Прямое управление движением НПС** — `IEntity.Move()`, `MoveForward()`, `MoveStop()`  
-  *Теперь НПС может ходить, а не просто телепортироваться!*
-- ✅ **Точное определение высоты рельефа** — `IPlayfield.GetTerrainHeightAt()`  
-  *Больше никаких баз в воздухе или под землёй!*
-- ✅ **Защита структур от распада** — `Request_Structure_Touch`  
-  *База Zirax не развалится от старости!*
-- ✅ **Программные волны атак** — `IPda.CreateWaveAttack()`  
-  *Создаём атаки программно, а не через костыли!*
-- ✅ **Расширенный спавн НПС** — `IPda.SpawnEntityAtPosition()` с фракциями  
-  *Враги спавнятся правильно и сразу стреляют!*
-
-💡 Эти возможности **значительно** улучшают реализуемость проекта!  
-Подробнее: [API_v1.15_Новые_возможности.md](docs/architecture/API_v1.15_Новые_возможности.md)
+- 🔲 AIM Orchestrator и Threat Director (патрули, волны, реакция в бою)
+- 🔲 Hostility Tracker («Most Wanted»)
+- 🔲 Transport Manager
+- 🔲 Полировка и релиз 1.0
 
 ---
 
 ## 📚 Документация
 
-*Да, у нас есть документация. Настоящая. Живая. Актуальная!* 📖
+Вся архитектура — в [`docs/architecture/`](docs/architecture/).
 
-### Основные документы
+1. **[01_Техническое_задание.md](docs/architecture/01_Техническое_задание.md)** — что делаем
+2. **[02_Архитектурный_план.md](docs/architecture/02_Архитектурный_план.md)** — как устроены модули
+3. **[03_Технический_проект.md](docs/architecture/03_Технический_проект.md)** — классы, интерфейсы, алгоритмы
+4. **[04_Modular_Development_Plan.md](docs/architecture/04_Modular_Development_Plan.md)** — фазы разработки
+5. **[05_Схема_данных.md](docs/architecture/05_Схема_данных.md)** — `state.json` и персистентность
+6. **[06_ConfigReference.md](docs/architecture/06_ConfigReference.md)** — параметры конфигурации
+7. **[07_Operations_Runbook.md](docs/architecture/07_Operations_Runbook.md)** — установка, мониторинг, разбор сбоев
+8. **[08_Security_AbuseCases.md](docs/architecture/08_Security_AbuseCases.md)** — угрозы и контрмеры
+9. **[09_Testing_Strategy.md](docs/architecture/09_Testing_Strategy.md)** — unit / integration / E2E
+10. **[10_UI_UX_Design_Guide.md](docs/architecture/10_UI_UX_Design_Guide.md)** — команды, логи, UX
+11. **[11_Colony_Virtualization.md](docs/architecture/11_Colony_Virtualization.md)** — виртуальные колонии и материализация
+12. **[12_Multi_Process_IPC_Architecture.md](docs/architecture/12_Multi_Process_IPC_Architecture.md)** — Dedi ↔ PfServer, канал `INetwork`
 
-Вся документация находится в [`docs/architecture/`](docs/architecture/). Читайте по порядку или сразу к нужной теме:
+Для проверки колонии на сервере: [`docs/manuals/Tester_Manual_Colony_Access.md`](docs/manuals/Tester_Manual_Colony_Access.md).
 
-1. **[01_Техническое_задание.md](docs/architecture/01_Техническое_задание.md)**  
-   *ЧТО мы делаем* — функциональные требования (FR-001 до FR-011)
+### Модули
 
-2. **[02_Архитектурный_план.md](docs/architecture/02_Архитектурный_план.md)**  
-   *КАК мы это делаем* — C4-диаграммы, паттерны, архитектура модулей
+Описания в [`docs/architecture/modules/`](docs/architecture/modules/):
 
-3. **[03_Технический_проект.md](docs/architecture/03_Технический_проект.md)**  
-   *Детали реализации* — классы, интерфейсы, алгоритмы, sequence-диаграммы
+| Модуль | В коде |
+| --- | --- |
+| [Core Loop](docs/architecture/modules/Module_01_Core_Loop.md) | да |
+| [Empyrion Gateway](docs/architecture/modules/Module_02_EmpyrionGateway.md) | да |
+| [State Store](docs/architecture/modules/Module_03_StateStore.md) | да |
+| [Entity Spawner](docs/architecture/modules/Module_04_Entity_Spawner.md) | да (спавн только с PfServer) |
+| [AIM Orchestrator](docs/architecture/modules/Module_05_AIM_Orchestrator.md) | нет |
+| [Placement Resolver](docs/architecture/modules/Module_06_Placement_Resolver.md) | да |
+| [Colony Evolution](docs/architecture/modules/Module_07_Colony_Evolution.md) | да |
+| [Player Tracker](docs/architecture/modules/Module_08_Player_Tracker.md) | да |
+| [Structure Tracker](docs/architecture/modules/Module_09_Structure_Tracker.md) | да |
+| [Threat Director](docs/architecture/modules/Module_10_Threat_Director.md) | нет |
+| [Economy Simulator](docs/architecture/modules/Module_11_Economy_Simulator.md) | да |
+| [Hostility Tracker](docs/architecture/modules/Module_12_Hostility_Tracker.md) | нет |
+| [Unit Economy](docs/architecture/modules/Module_13_Unit_Economy.md) | да |
+| [Transport Manager](docs/architecture/modules/Module_14_Transport_Manager.md) | нет |
 
-4. **[04_Modular_Development_Plan.md](docs/architecture/04_Modular_Development_Plan.md)**  
-   *План действий* — поэтапный план разработки (5 фаз, 12 недель)
+### Memory Bank
 
-5. **[05_Схема_данных.md](docs/architecture/05_Схема_данных.md)**  
-   *Что и где хранится* — структура state.json, миграции, персистентность
-
-6. **[06_ConfigReference.md](docs/architecture/06_ConfigReference.md)**  
-   *Настройка мода* — полный справочник параметров конфигурации
-
-7. **[07_Operations_Runbook.md](docs/architecture/07_Operations_Runbook.md)**  
-   *Эксплуатация* — установка, мониторинг, troubleshooting
-
-8. **[08_Security_AbuseCases.md](docs/architecture/08_Security_AbuseCases.md)**  
-   *Безопасность* — анализ угроз, защита, контрмеры
-
-9. **[09_Testing_Strategy.md](docs/architecture/09_Testing_Strategy.md)**  
-   *Тестирование* — unit/integration/E2E тестирование
-
-10. **[10_UI_UX_Design_Guide.md](docs/architecture/10_UI_UX_Design_Guide.md)**  
-    *Пользовательский опыт* — chat-команды, логирование, UX
-
-### Описания модулей
-
-*Детальные описания каждого модуля* в [`docs/architecture/modules/`](docs/architecture/modules/):
-
-- **Module_01_Core_Loop.md** — ⚙️ главный цикл симуляции (сердце системы)
-- **Module_02_EmpyrionGateway.md** — 🔌 адаптер для ModAPI ⭐ *обновлен*
-- **Module_03_StateStore.md** — 💾 персистентность и бэкапы (сохраняем всё!)
-- **Module_04_Spawning_Evolution.md** — 🐣 спавн и эволюция сущностей ⭐ *обновлен*
-- **Module_05_AIM_Orchestrator.md** — 🎯 управление AIM и НПС ⭐ *обновлен*
-- **Module_06_Placement_Resolver.md** — 📍 поиск мест для размещения ⭐ *обновлен*
-- **Module_07_Colony_Evolution.md** — 🏗️ управление стадиями колоний ⭐ *обновлен*
-- **Module_08_Player_Tracker.md** — 👤 отслеживание игроков ⭐ *обновлен*
-- **Module_10_Threat_Director.md** — ⚔️ управление угрозами ⭐ *обновлен*
-- **Module_12_Hostility_Tracker.md** — 😈 система "Most Wanted" ⭐ **НОВЫЙ!**
-
-### Справочная документация
-
-- **[API_v1.15_Новые_возможности.md](docs/architecture/API_v1.15_Новые_возможности.md)** ⭐ **НОВОЕ**  
-  *Детальное описание новых возможностей ModAPI v1.15 (найденных декомпиляцией)*
-
-### Memory Bank (для AI-ассистентов)
-
-*Контекстная информация для AI* в [`memory-bank/`](memory-bank/):
-
-- **projectbrief.md** — краткое описание проекта *(5 минут чтения)*
-- **productContext.md** — проблематика, аудитория, решения *(что и почему)*
-- **systemPatterns.md** — архитектурные паттерны *(как всё устроено)*
-- **techContext.md** — технологический стек и workflow *(чем и как разрабатываем)*
-- **activeContext.md** — текущее состояние *(что сейчас происходит)*
-- **progress.md** — прогресс разработки *(что сделано, что осталось)*
+Контекст для продолжения работы — в [`memory-bank/`](memory-bank/): `projectbrief.md`, `productContext.md`, `systemPatterns.md`, `techContext.md`, `activeContext.md`, `progress.md`.
 
 ---
 
-## 🎬 Как это работает?
+## 🎬 Как это работает
 
 ### Представьте себе...
 
@@ -273,157 +228,107 @@ AI не тупой. Он адаптируется:
 
 ## 🚀 Roadmap
 
-*Путь от идеи до живых Zirax в 5 простых фаз* 📅
+План фаз — [04_Modular_Development_Plan.md](docs/architecture/04_Modular_Development_Plan.md). Календарь «недели 1–12» из января 2026 года уже позади; ниже — фактический статус кода.
 
-### Phase 1: Foundation (Недели 1-2) — 🔴 Not Started
-*Закладываем фундамент — без него никуда!*
-- 🔌 **Empyrion Gateway** (API Adapter) — подключаемся к игре
-- 💾 **State Store** (Persistence) — сохраняем состояние
-- 🎯 **Mod Entry Point** (DI, Logging) — входная точка мода
+### Phase 1–2: Foundation и Core — ✅ сделано
+Шлюз ModAPI, State Store, точка входа, цикл симуляции, трекеры игроков и структур.
 
-### Phase 2: Core (Недели 3-4) — 🔴 Not Started
-*Сердце системы — главный цикл симуляции*
-- ⚙️ **Core Loop** & Simulation Engine — главный цикл
-- 👤 **Player & Structure Trackers** — следим за всеми
+### Phase 3: Domain — ✅ сделано
+Спавн и стадии, поиск места, экономика, виртуальные колонии.
 
-### Phase 3: Domain (Недели 5-7) — 🔴 Not Started
-*Бизнес-логика — здесь магия начинается!*
-- 🐣 **Spawning & Evolution** — спавн и эволюция
-- 📍 **Placement Resolver** — ищем места для баз
-- 💰 **Economy Simulation** — экономика и ресурсы
+### Phase 3.1–3.5: материализация и IPC — ✅ в коде, прогон на dedicated открыт
+`NativePlayfieldSpawner`, уведомление о готовности playfield, маршрутизация спавна только через IPC, разбор сообщений по полю `type`. Осталось увидеть на живом сервере ответ PfServer и `EntityId`.
 
-### Phase 4: Combat (Недели 8-9) — 🔴 Not Started
-*Боевая система — время делать Zirax опасными!*
-- 🎯 **AIM Orchestrator** — управление НПС
-- ⚔️ **Threat Director** — система угроз и охоты
+### Phase 4: Combat — 🔲 не начата
+AIM Orchestrator, Threat Director, затем Hostility Tracker.
 
-### Phase 5: Polish (Недели 10-12) — 🔴 Not Started
-*Полируем до блеска и добавляем плюшки*
-- ⚡ **Optimization & Performance** — оптимизация (важно!)
-- ✨ **Advanced Features** (Post-MVP) — дополнительные фичи
-- 📝 **Documentation updates** — обновление документации
-
-**Ожидаемая дата MVP:** 21.03.2026 *(первая играбельная версия)*  
-**Ожидаемая дата релиза:** 18.04.2026 *(стабильный релиз 1.0)* 🎉
+### Phase 5: Polish — 🔲 не начата
+Производительность, дополнительные механики, стабильный релиз.
 
 ---
 
 ## 🛠️ Технологии
 
-*На чём это всё работает?*
-
-- **Язык:** C# 8.0+ *(потому что патерн-матчинг — это красиво)*
-- **Runtime:** .NET Framework 4.8 *(да, старый добрый Framework, Empyrion любит стабильность)*
-- **Game:** Empyrion: Galactic Survival v1.15 Experimental *(самая свежая версия!)*
-- **Зависимости:** 
-  - Newtonsoft.Json *(для сохранения состояния)*
-  - NLog *(логи, много логов)*
-- **Тестирование:** 
-  - xUnit *(пишем тесты, чтобы не плакать на проде)*
-  - Moq *(мокаем API, чтобы тесты не требовали игры)*
+- **Язык:** C# 8.0, nullable
+- **Runtime:** .NET Framework 4.8
+- **Игра:** Empyrion: Galactic Survival, ModAPI dedicated (experimental-линейка, с которой собирался мод)
+- **Пакеты:** Newtonsoft.Json 13.0.3, NLog 5.3.4
+- **Игра, ссылки из `lib/`:** `ModApi.dll`, `Mif.dll`, `UnityEngine.CoreModule.dll`
+- **Тесты:** xUnit, Moq
 
 ---
 
 ## 📦 Структура проекта
 
-*Как всё организовано? Очень просто!*
-
 ```
 GalacticExpansion/
+├── src/
+│   ├── GalacticExpansion/                 # ModMain, EmpyrionModChannel
+│   ├── GalacticExpansion.Core/            # симуляция, шлюз, IPC, спавн, экономика
+│   ├── GalacticExpansion.Models/          # состояние, колония, конфиг
+│   ├── GalacticExpansion.Tests.Unit/
+│   ├── GalacticExpansion.Tests.Integration/
+│   └── GalacticExpansion.sln
 ├── docs/
-│   ├── architecture/          # 📚 Техническая документация (всё, что нужно знать)
-│   │   ├── modules/          # Описания модулей
-│   │   └── *.md              # 10 основных документов
-│   └── examples/             # 📝 Примеры кода от других модов (учимся на чужих ошибках)
-├── memory-bank/              # 🧠 Контекст для AI-ассистентов
-│   ├── projectbrief.md       # Краткое описание
-│   ├── productContext.md     # Продуктовый контекст
-│   ├── systemPatterns.md     # Архитектурные паттерны
-│   ├── techContext.md        # Технический контекст
-│   ├── activeContext.md      # Текущее состояние
-│   └── progress.md           # Прогресс разработки
-├── src/                      # 💻 Исходный код (скоро здесь будет магия)
-└── tests/                    # ✅ Тесты (потому что мы не хотим багов)
+│   ├── architecture/                      # 01–12 и modules/
+│   ├── manuals/                           # инструкция тестировщика
+│   └── game api wiki/                     # выгрузки ModAPI
+├── memory-bank/
+├── tools/                                 # deploy_mod.cmd, view_logs.cmd
+├── config/                                # Configuration.json (путь к игре и баланс)
+└── lib/                                   # DLL Empyrion, в репозиторий не коммитятся как исходники мода
 ```
 
 ---
 
 ## 📖 Для разработчиков
 
-*Хотите внести свой вклад? Добро пожаловать! 🎉*
+С чего начать: [техническое задание](docs/architecture/01_Техническое_задание.md), [архитектурный план](docs/architecture/02_Архитектурный_план.md), [IPC](docs/architecture/12_Multi_Process_IPC_Architecture.md) и [виртуализация колоний](docs/architecture/11_Colony_Virtualization.md). Текущий фокус — `memory-bank/activeContext.md`.
 
-### Начало работы
-
-**Шаг 1: Погружение в документацию** 📚  
-Да, мы знаем, что документация — это скучно. Но наша — другая! *(Ну ладно, всё равно скучная, но полезная)*
-   - Начните с [Технического задания](docs/architecture/01_Техническое_задание.md) — узнаете ЧТО мы делаем
-   - Изучите [Архитектурный план](docs/architecture/02_Архитектурный_план.md) — поймёте КАК мы это делаем
-   - Ознакомьтесь с [Планом разработки](docs/architecture/04_Modular_Development_Plan.md) — увидите КОГДА что делать
-
-**Шаг 2: Подружитесь с Memory Bank** 🧠  
-*(Это для AI-ассистентов, но и людям полезно!)*
-   - [projectbrief.md](memory-bank/projectbrief.md) — быстрый обзор проекта за 5 минут
-   - [activeContext.md](memory-bank/activeContext.md) — что происходит прямо сейчас
-   - [systemPatterns.md](memory-bank/systemPatterns.md) — архитектурные паттерны и ключевые решения
-
-**Шаг 3: Погнали код!** 💻  
-   - Следуйте Phase 1 из [Modular Development Plan](docs/architecture/04_Modular_Development_Plan.md)
-   - Первый модуль для разработки: **Empyrion Gateway** (адаптер для ModAPI)
-
-### Сборка и развертывание
-
-**После успешной сборки проекта** *(когда всё скомпилировалось без 100500 ошибок)*:
+Сборка и тесты:
 
 ```cmd
-# Автоматическое развертывание мода (магия происходит здесь)
+dotnet build src/GalacticExpansion.sln --configuration Release
+dotnet test src/GalacticExpansion.sln
+```
+
+Если NuGet недоступен, к сборке можно добавить `--no-restore` (пакеты уже в кэше).
+
+Выкладка на локальный dedicated (путь к игре берётся из `config/Configuration.json`, поле `EmpyrionPath`):
+
+```cmd
 cd tools
 deploy_mod.cmd Release
-
-# Просмотр логов сервера (чтобы понять, что пошло не так 😅)
 view_logs.cmd
 ```
 
-### Стандарты кода
+Скрипт деплоя сохраняет пользовательские `Configuration.json` и `state.json` и не затирает их свежей сборкой.
 
-*Пишем код, который не заставит будущих разработчиков плакать:*
-
-- ✅ **C# Coding Conventions** — никаких `var` где попало, пожалуйста
-- ✅ **XML-комментарии** для всех публичных API — расскажите, что делает ваш код!
-- ✅ **Async/await** для всех IO операций — блокировать поток в 2026? Серьёзно?
-- ✅ **Unit-тесты** (> 70% coverage для критичных модулей) — если оно падает, мы хотим знать **до** релиза
+В коде: XML-комментарии на русском у публичных API, async для ввода-вывода, тесты на критичных модулях по [стратегии тестирования](docs/architecture/09_Testing_Strategy.md).
 
 ---
 
 ## 📄 Лицензия
 
-Лицензия Apache 2.0 — делайте с этим что хотите, только не забудьте упомянуть авторов 😉
+Apache 2.0.
 
 ---
 
-## 👥 Контакты и поддержка
+## 👥 Контакты
 
-**Нашли баг?** 🐛  
-Создайте Issue в репозитории — мы обязательно посмотрим!
+Баг — Issue в репозитории.  
+Репозиторий: https://github.com/Gexon/GalacticExpansion  
+Записи разработки: https://live.vkvideo.ru/wobportal
 
-**Хотите почитать код?** 📖  
-- Документация: `docs/architecture/`  
-- Примеры: `docs/examples/`
-
-**Хотите посмотреть, как это создавалось?** 🎥  
-Записи стримов: https://live.vkvideo.ru/wobportal  
-*(Предупреждаем: там много кофе, багов и странных решений, которые почему-то работают)*
-
-**Вы здесь** -> https://github.com/Gexon/GalacticExpansion
 ---
 
 ## 🎮 Приятной игры!
 
-Помните: Zirax теперь не просто мишени. Они строят, развиваются, мстят. И да, они помнят.
+Zirax уже умеют жить в симуляции и проситься в мир. Охота и патрули — следующий заход.
 
-*Удачи, командор! o7* 🚀
+*Удачи, командор. o7*
 
 ---
 
-**Версия документации:** 1.0  
-**Дата создания:** 24.01.2026  
-**Последнее обновление:** 29.01.2026
+**Версия документации:** 1.1  
+**Последнее обновление:** 01.10.2026
