@@ -4,7 +4,7 @@
 
 **Дата обновления:** 01.10.2026  
 **IPC-канал (GetCallingAssembly):** ✅ пакеты ходят в обе стороны (логи v5, 18:30)  
-**DeserializeMessage:** ❌ следующий скоуп, спавн из-за этого таймаутится  
+**DeserializeMessage:** ✅ читает `type`, затем конкретный класс (unit 4/4). Прогон на dedicated ещё не сделан  
 **Phase 3.5 (Fix spawn routing):** ✅ РЕАЛИЗОВАНО  
 **Phase 4 (Combat):** не начата
 
@@ -29,7 +29,7 @@
 
 `RegisterReceiver*` в игре ключует колбэк именем вызывающей сборки. Вызовы перенесены в `EmpyrionModChannel` (`GalacticExpansion.dll`). В логах v5 оба процесса получают `Received packet from 'GalacticExpansion'`.
 
-Дальше `DeserializeMessage` падает на абстрактном `IPCMessage` (`Path 'pf'`). Ответ не уходит, деди ловит `IPC spawn timeout after 15s`. Разбор JSON — отдельный скоуп, не делать «заодно» с каналом.
+`DeserializeMessage` читает `type` через `JObject` и десериализует конкретный класс. `DeserializeObject<IPCMessage>` убран: базовый класс абстрактный, в JSON первым идёт `pf`. Тесты: `NetworkBridgeDeserializeTests`. На dedicated этот билд ещё не запускали.
 
 ## Что работает
 

@@ -3,7 +3,7 @@
 ## Текущее состояние
 
 **Дата обновления:** 01.10.2026  
-**Фаза:** IPC-канал доставляет пакеты в обе стороны. Следующий скоуп — `DeserializeMessage`.
+**Фаза:** IPC-канал доставляет пакеты, JSON разбирается по полю `type`. Следующий скоуп — прогон материализации на dedicated.
 
 ## Последние изменения (01.10.2026) — канал INetwork
 
@@ -13,7 +13,7 @@
 
 Вызов из `GalacticExpansion.Core.dll` регистрировал канал `GalacticExpansion.Core` при `receiver` `"GalacticExpansion"`. Исправление: единственная точка вызова — `EmpyrionModChannel` в сборке `GalacticExpansion.dll` (`NoInlining`, отдельный кадр стека). `NetworkBridge` ходит только через `IEmpyrionModChannel`.
 
-`DeserializeMessage` в этот скоуп не входил. Пакет приходит и падает: `DeserializeObject<IPCMessage>` на абстрактном классе (`Path 'pf'`). Ответа нет, деди получает `IPC spawn timeout after 15s`. Чинить чтением поля `type` и десериализацией конкретного класса.
+`DeserializeMessage` больше не вызывает `DeserializeObject<IPCMessage>`. `JObject` читает поле `type`, затем создаётся конкретный класс. В логе v5 падение было на `Path 'pf'`: это первое поле наследника, не битый JSON. Unit-тесты: `NetworkBridgeDeserializeTests` (4/4). На dedicated после этого фикса ещё не прогоняли: нужен ответ PfServer и EntityId.
 
 Phase 3.5 (EntitySpawner снят с Dedi) остаётся в силе, детали в `progress.md`. Поток материализации тот же: Dedi считает позицию, спавн только через IPC на PfServer.
 
@@ -36,6 +36,5 @@ Phase 3.5 (EntitySpawner снят с Dedi) остаётся в силе, дет�
 
 ## Следующие шаги
 
-1. Починить `DeserializeMessage`: не создавать `IPCMessage`, сначала прочитать `type`.
-2. Повторить прогон материализации на dedicated: после разбора JSON должен быть ответ PfServer и EntityId.
-3. Phase 4: Threat Director + AIM Orchestrator.
+1. Повторить прогон материализации на dedicated: после разбора JSON должен быть ответ PfServer и EntityId.
+2. Phase 4: Threat Director + AIM Orchestrator.

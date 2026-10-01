@@ -108,6 +108,8 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 
 Направления: Dedi — `RegisterReceiverForPlayfieldPackets` + `SendToPlayfieldServer`. PfServer — `RegisterReceiverForDediPackets` + `SendToDedicatedServer`. Обратный `Send*` в том же процессе — заглушка и возвращает `false`.
 
+`DeserializeMessage` не создаёт абстрактный `IPCMessage`. Сначала поле `type`, потом конкретный класс.
+
 Подробности: `docs/architecture/12_Multi_Process_IPC_Architecture.md`, раздел «Канал INetwork — имя вызывающей сборки».
 
 ### TryCompleteResponse: null-safe (Phase 3.5)

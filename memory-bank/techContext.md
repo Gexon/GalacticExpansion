@@ -105,7 +105,7 @@ IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlac
 
 `SendToPlayfieldServer` на dedicated возвращает `false`, пока PfServer процесса нет. `SendToDedicatedServer` в dedicated-сборке — заглушка `false`; рабочая реализация у клиентской сборки, которой пользуется PfServer. Наоборот тоже: с плейфилда `SendToPlayfieldServer` всегда `false`.
 
-Открытый баг: `DeserializeMessage` вызывает `DeserializeObject<IPCMessage>` при абстрактном базовом классе. Пакет уже доставлен (`Received packet from 'GalacticExpansion'`), дальше `Failed to deserialize message` и таймаут 15 с. Следующий скоуп.
+`DeserializeMessage` читает поле `type` (`JObject`), затем `DeserializeObject` конкретного класса. `DeserializeObject<IPCMessage>` нельзя: класс абстрактный. В логе v5 путь `pf` — первое поле наследника.
 
 ## IPC протокол (типы сообщений)
 - `SpawnStructure` / `SpawnStructureResponse` — спавн структуры

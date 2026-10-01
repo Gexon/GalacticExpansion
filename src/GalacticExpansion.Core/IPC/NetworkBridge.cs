@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NLog;
 
 namespace GalacticExpansion.Core.IPC
@@ -380,22 +381,29 @@ namespace GalacticExpansion.Core.IPC
         }
 
         /// <summary>
-        /// Десериализует byte[] в IPC сообщение.
-        /// Определяет тип сообщения по полю MessageType и десериализует в соответствующий класс.
+        /// Десериализует byte[] в конкретный класс IPC-сообщения.
+        /// IPCMessage абстрактный: JsonConvert.DeserializeObject&lt;IPCMessage&gt; падает
+        /// с «Could not create an instance», ещё до чтения полей.
+        /// Сначала читаем поле type из JSON (JObject экземпляр не создаёт),
+        /// и только потом десериализуем наследника: SpawnStructureRequest и остальные.
+        /// Поле type в JSON не первое: Newtonsoft пишет свойства наследника (pf, prefab)
+        /// раньше свойств базового класса.
         /// </summary>
         private IPCMessage? DeserializeMessage(byte[] data)
         {
             try
             {
                 var json = Encoding.UTF8.GetString(data);
-                
-                // Сначала десериализуем как базовый класс чтобы получить MessageType
-                var baseMessage = JsonConvert.DeserializeObject<IPCMessage>(json);
-                if (baseMessage == null)
-                    return null;
 
-                // Десериализуем в правильный тип на основе MessageType
-                return baseMessage.MessageType switch
+                // JObject.Parse только разбирает текст. Объект IPCMessage здесь не создаётся.
+                var messageType = JObject.Parse(json)["type"]?.Value<string>();
+                if (string.IsNullOrEmpty(messageType))
+                {
+                    _logger.Error("IPC JSON has no type field");
+                    return null;
+                }
+
+                return messageType switch
                 {
                     "SpawnStructure" => JsonConvert.DeserializeObject<SpawnStructureRequest>(json),
                     "SpawnStructureResponse" => JsonConvert.DeserializeObject<SpawnStructureResponse>(json),
@@ -404,7 +412,7 @@ namespace GalacticExpansion.Core.IPC
                     "PlayfieldReady" => JsonConvert.DeserializeObject<PlayfieldReadyRequest>(json),
                     "PlayfieldReadyResponse" => JsonConvert.DeserializeObject<PlayfieldReadyResponse>(json),
                     "PlayfieldReadyNotification" => JsonConvert.DeserializeObject<PlayfieldReadyNotification>(json),
-                    _ => throw new InvalidOperationException($"Unknown message type: {baseMessage.MessageType}")
+                    _ => throw new InvalidOperationException($"Unknown message type: {messageType}")
                 };
             }
             catch (Exception ex)

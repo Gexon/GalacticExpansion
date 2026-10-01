@@ -2,7 +2,7 @@
 
 **Версия:** 1.1  
 **Дата:** 2026-10-01  
-**Статус:** Доставка пакетов подтверждена на сервере. Разбор JSON в `DeserializeMessage` — следующий скоуп.
+**Статус:** Доставка пакетов подтверждена. `DeserializeMessage` читает поле `type` и создаёт конкретный класс, абстрактный `IPCMessage` не инстанциируется.
 
 ## Оглавление
 
@@ -203,6 +203,8 @@ private byte[] SerializeMessage(IPCMessage message)
     return Encoding.UTF8.GetBytes(json);
 }
 ```
+
+При чтении `DeserializeMessage` не вызывает `DeserializeObject<IPCMessage>`: базовый класс абстрактный, а в JSON первым часто идёт поле наследника (`pf`). Сначала `JObject` читает `type`, затем десериализуется конкретный класс (`SpawnStructureRequest` и остальные).
 
 **Почему JSON?**
 - ✅ Человекочитаемый формат (легко отлаживать)
@@ -703,7 +705,7 @@ NLog.GlobalDiagnosticsContext.Set("process", _processPrefix);
 
 **2. `IPC spawn timeout after 15s`**
 - В логе PfServer нет `Received packet` — пакет не дошёл до колбэка. Чаще всего `Register*`/`Send*` вызваны не из `GalacticExpansion.dll` (ключ `GalacticExpansion.Core`), либо playfield-процесс ещё не зарегистрировал приёмник. `Send*` при этом может быть `true`.
-- Есть `Received packet from 'GalacticExpansion'`, затем `Failed to deserialize message` и `Could not create an instance of type IPCMessage` — транспорт жив. `DeserializeMessage` делает `DeserializeObject<IPCMessage>`, а базовый класс абстрактный. Это открытый баг, чинится отдельно: сначала прочитать поле `type`, потом десериализовать конкретный класс.
+- Есть `Received packet from 'GalacticExpansion'`, затем `Failed to deserialize message` и `Could not create an instance of type IPCMessage` — транспорт жив, сломан разбор. `DeserializeMessage` должен прочитать поле `type` через `JObject` и десериализовать конкретный класс. `DeserializeObject<IPCMessage>` вызывать нельзя: класс абстрактный, а путь в ошибке (`Path 'pf'`) — первое поле наследника, не признак порчи JSON.
 - `Failed to send message to playfield` (исключение, не таймаут) — `SendToPlayfieldServer` вернул `false`: процесс плейфилда ещё не поднят.
 - Имя playfield сравнивается как есть, включая пробелы и регистр.
 
