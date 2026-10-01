@@ -98,6 +98,18 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 - На Dedi `_directSpawner = null`, `DestroyEntityAsync`/`EntityExistsAsync` бросают `InvalidOperationException`
 - Terrain height на Dedi через `IPlacementResolver.FindLocationAtTerrainAsync`
 
+### Канал INetwork = имя вызывающей сборки (01.10.2026)
+
+**Принцип:** `ModApi.Network.RegisterReceiver*` и `Send*` вызываются только из `EmpyrionModChannel` в сборке `GalacticExpansion.dll`.
+
+Игра ключует колбэк через `GetCallingAssembly().GetName().Name`. Вызов из Core даёт ключ `GalacticExpansion.Core`. Строка `receiver` `"GalacticExpansion"` этот ключ не находит. `Send*` может вернуть `true`, колбэк не вызывается, лога игры нет.
+
+`sender` в колбэке — сборка, которая вызвала `Send*`. Методы канала помечены `NoInlining`: инлайн в Core снова подменит сборку.
+
+Направления: Dedi — `RegisterReceiverForPlayfieldPackets` + `SendToPlayfieldServer`. PfServer — `RegisterReceiverForDediPackets` + `SendToDedicatedServer`. Обратный `Send*` в том же процессе — заглушка и возвращает `false`.
+
+Подробности: `docs/architecture/12_Multi_Process_IPC_Architecture.md`, раздел «Канал INetwork — имя вызывающей сборки».
+
 ### TryCompleteResponse: null-safe (Phase 3.5)
 
 **Принцип:** `EmpyrionGateway.TryCompleteResponse` проверяет `data == null` перед `data.GetType()`. Event_Ok от Empyrion приходит с null data — рефлексия невозможна, возвращаем false.
@@ -116,5 +128,6 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 10. В PfServer спавн через `NativePlayfieldSpawner` или `_directSpawner`.
 11. **Виртуальные колонии:** физические операции запрещены; только обновление в памяти.
 12. **Multi-process:** Spawn работает ТОЛЬКО из PfServer процесса.
+12a. **INetwork:** вызывать только из `EmpyrionModChannel` (`GalacticExpansion.dll`). Не из Core.
 13. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
 14. **TryCompleteResponse:** `data == null` → return false (Event_Ok).

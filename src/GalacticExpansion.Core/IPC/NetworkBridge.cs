@@ -3,21 +3,20 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Eleon.Modding;
 using Newtonsoft.Json;
 using NLog;
 
 namespace GalacticExpansion.Core.IPC
 {
     /// <summary>
-    /// Управляет IPC коммуникацией между Dedi и PfServer процессами через INetwork.
-    /// Предоставляет async/await API для отправки запросов и получения ответов.
+    /// Управляет IPC между Dedi и PfServer.
+    /// Сам ModApi.Network не вызывает: это делает IEmpyrionModChannel из сборки GalacticExpansion,
+    /// иначе игра регистрирует колбэк под именем GalacticExpansion.Core и пакеты не доходят.
     /// </summary>
     public class NetworkBridge : IDisposable
     {
-        private readonly IModApi _modApi;
+        private readonly IEmpyrionModChannel _channel;
         private readonly ILogger _logger;
-        private readonly string _receiverId = "GLEX"; // Уникальный ID для регистрации receiver
 
         // Dictionary для tracking pending requests: RequestId -> TaskCompletionSource
         private readonly ConcurrentDictionary<Guid, PendingRequest> _pendingRequests = new ConcurrentDictionary<Guid, PendingRequest>();
@@ -44,18 +43,21 @@ namespace GalacticExpansion.Core.IPC
         /// <summary>
         /// Инициализирует новый экземпляр NetworkBridge для управления IPC коммуникацией.
         /// </summary>
-        /// <param name="modApi">API мода для доступа к сетевым функциям Empyrion</param>
+        /// <param name="channel">Канал INetwork из сборки GalacticExpansion. Из Core вызывать ModApi.Network нельзя: игра привяжет колбэк к GalacticExpansion.Core.</param>
         /// <param name="logger">Логгер для записи диагностической информации</param>
-        /// <exception cref="ArgumentNullException">Выбрасывается если modApi или logger равны null</exception>
-        public NetworkBridge(IModApi modApi, ILogger logger)
+        /// <exception cref="ArgumentNullException">Выбрасывается если channel или logger равны null</exception>
+        public NetworkBridge(IEmpyrionModChannel channel, ILogger logger)
         {
-            _modApi = modApi ?? throw new ArgumentNullException(nameof(modApi));
+            _channel = channel ?? throw new ArgumentNullException(nameof(channel));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>
         /// Инициализирует NetworkBridge для Dedi процесса.
-        /// Регистрирует receiver для получения ответов от PfServer.
+        /// Регистрирует приёмник пакетов, которые пришли С playfield.
+        /// Имя метода Empyrion — про источник пакета, не про процесс подписчика:
+        /// dedicated слушает RegisterReceiverForPlayfieldPackets
+        /// (так делает EmpyrionScripting.PlayerCommandsDediHelper).
         /// </summary>
         public void InitializeForDedi()
         {
@@ -66,21 +68,23 @@ namespace GalacticExpansion.Core.IPC
             }
 
             _logger.Info("Initializing NetworkBridge for Dedi process");
-            
-            if (_modApi.Network.RegisterReceiverForDediPackets(OnDediPacketReceived))
+
+            // Пакеты PfServer → Dedi (SendToDedicatedServer) приходят сюда.
+            if (_channel.RegisterReceiverForPlayfieldPackets(OnDediPacketReceived))
             {
                 _isReceiverRegistered = true;
-                _logger.Info("✅ Dedi receiver registered successfully");
+                _logger.Info("✅ Dedi receiver registered (RegisterReceiverForPlayfieldPackets)");
             }
             else
             {
-                _logger.Error("❌ Failed to register Dedi receiver");
+                _logger.Error("❌ Failed to register Dedi receiver for playfield packets");
             }
         }
 
         /// <summary>
         /// Инициализирует NetworkBridge для PfServer процесса.
-        /// Регистрирует receiver для получения запросов от Dedi и отправки ответов.
+        /// Слушает пакеты, созданные на dedicated: RegisterReceiverForDediPackets.
+        /// Ответы уходят обратно через SendToDedicatedServer.
         /// </summary>
         /// <param name="playfieldName">Название playfield этого PfServer процесса</param>
         public void InitializeForPlayfieldServer(string playfieldName)
@@ -97,14 +101,16 @@ namespace GalacticExpansion.Core.IPC
             _currentPlayfield = playfieldName;
             _logger.Info($"Initializing NetworkBridge for PfServer process (playfield: {playfieldName})");
 
-            if (_modApi.Network.RegisterReceiverForPlayfieldPackets(OnPlayfieldPacketReceived))
+            // Пакеты Dedi → PfServer (SendToPlayfieldServer) приходят сюда.
+            // RegisterReceiverForDediPackets вызывается на playfield: пакет создан на dedicated.
+            if (_channel.RegisterReceiverForDediPackets(OnPlayfieldPacketReceived))
             {
                 _isReceiverRegistered = true;
-                _logger.Info($"✅ PfServer receiver registered for playfield '{playfieldName}'");
+                _logger.Info($"✅ PfServer receiver registered for playfield '{playfieldName}' (RegisterReceiverForDediPackets)");
             }
             else
             {
-                _logger.Error("❌ Failed to register PfServer receiver");
+                _logger.Error("❌ Failed to register PfServer receiver for dedi packets");
             }
         }
 
@@ -123,7 +129,7 @@ namespace GalacticExpansion.Core.IPC
             var data = SerializeMessage(notification);
             var playfield = _currentPlayfield ?? "Unknown";
 
-            _logger.Debug($"[PfServer] Attempting to send {notification.MessageType} to Dedi (receiverId: '{_receiverId}', playfield: '{playfield}', data size: {data.Length} bytes)");
+            _logger.Debug($"[PfServer] Attempting to send {notification.MessageType} to Dedi (channel: '{_channel.ChannelId}', playfield: '{playfield}', data size: {data.Length} bytes)");
 
             // Retry-логика: 3 попытки с задержкой 500ms между ними.
             // Dedi receiver может быть ещё не готов при первой попытке (timing issue).
@@ -136,7 +142,7 @@ namespace GalacticExpansion.Core.IPC
                 {
                     try
                     {
-                        if (_modApi.Network.SendToDedicatedServer(_receiverId, data, playfield))
+                        if (_channel.SendToDedicatedServer(data, playfield))
                         {
                             _logger.Info($"[PfServer] Sent {notification.MessageType} to Dedi (playfield: {playfield}, attempt {attempt}/{maxRetries})");
                             return;
@@ -199,7 +205,7 @@ namespace GalacticExpansion.Core.IPC
             {
                 // Сериализуем и отправляем
                 var data = SerializeMessage(request);
-                if (!_modApi.Network.SendToPlayfieldServer(_receiverId, playfieldName, data))
+                if (!_channel.SendToPlayfieldServer(playfieldName, data))
                 {
                     throw new InvalidOperationException($"Failed to send message to playfield '{playfieldName}'");
                 }
@@ -237,6 +243,14 @@ namespace GalacticExpansion.Core.IPC
         {
             try
             {
+                // Empyrion отдаёт этому callback все пакеты с playfield, не только наши.
+                // Чужой канал (другой мод) не десериализуем.
+                if (!string.Equals(sender, _channel.ChannelId, StringComparison.Ordinal))
+                {
+                    _logger.Debug($"[Dedi] Ignoring packet from sender '{sender}'");
+                    return;
+                }
+
                 _logger.Debug($"[Dedi] Received packet from '{sender}' (playfield: {playfieldName}, size: {data.Length} bytes)");
 
                 var message = DeserializeMessage(data);
@@ -283,6 +297,13 @@ namespace GalacticExpansion.Core.IPC
         {
             try
             {
+                // На playfield приходят все пакеты с dedicated. Берём только канал этого мода.
+                if (!string.Equals(sender, _channel.ChannelId, StringComparison.Ordinal))
+                {
+                    _logger.Debug($"[PfServer] Ignoring packet from sender '{sender}'");
+                    return;
+                }
+
                 _logger.Debug($"[PfServer] Received packet from '{sender}' (playfield: {playfieldName}, size: {data.Length} bytes)");
 
                 var message = DeserializeMessage(data);
@@ -310,7 +331,7 @@ namespace GalacticExpansion.Core.IPC
 
                             // Отправляем ответ обратно в Dedi
                             var responseData = SerializeMessage(response);
-                            if (_modApi.Network.SendToDedicatedServer(_receiverId, responseData, _currentPlayfield ?? playfieldName))
+                            if (_channel.SendToDedicatedServer(responseData, _currentPlayfield ?? playfieldName))
                             {
                                 _logger.Debug($"[PfServer] Response sent for RequestId={message.RequestId}");
                             }
@@ -338,7 +359,7 @@ namespace GalacticExpansion.Core.IPC
                         };
 
                         var errorData = SerializeMessage(errorResponse);
-                        _modApi.Network.SendToDedicatedServer(_receiverId, errorData, _currentPlayfield ?? playfieldName);
+                        _channel.SendToDedicatedServer(errorData, _currentPlayfield ?? playfieldName);
                     }
                 });
             }

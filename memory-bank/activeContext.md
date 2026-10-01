@@ -2,38 +2,20 @@
 
 ## Текущее состояние
 
-**Дата обновления:** 23.02.2026  
-**Фаза:** Phase 3.5 — Fix spawn routing + выпилен EntitySpawner из Dedi ✅
+**Дата обновления:** 01.10.2026  
+**Фаза:** IPC-канал доставляет пакеты в обе стороны. Следующий скоуп — `DeserializeMessage`.
 
-## Последние изменения (Phase 3.5)
+## Последние изменения (01.10.2026) — канал INetwork
 
-### Исправление маршрутизации спавна: EntitySpawner полностью удалён из Dedi
+Пакеты Dedi ↔ PfServer доходят. Логи `logs-2006-10-01_v5`, 18:30: обе стороны пишут `Received packet from 'GalacticExpansion'`.
 
-**Проблема:** После Phase 3.4 (deadlock fix) материализация запускалась, но структуры всё равно не спавнились.
-Два связанных бага:
+Игра (`Eleon.ModBridge.NetworkBridge` в `Assembly-CSharp.dll`) кладёт колбэк под `Assembly.GetCallingAssembly().GetName().Name`. Имя из yaml и папка мода не используются. `Send*(receiver)` ищет этот ключ через `TryGetValue`. Нет ключа — колбэк не вызывается, игра молчит, а `Send*` всё равно может вернуть `true`.
 
-1. **IPCEntitySpawner.SpawnStructureAtTerrainAsync обходил IPC** — делегировал к `_directSpawner` (EntitySpawner), который отправлял `Request_Entity_Spawn` через ModAPI Gateway на Dedi. Empyrion отвечал `Event_Ok` (null data) вместо entity ID → NullReferenceException → timeout 10s.
+Вызов из `GalacticExpansion.Core.dll` регистрировал канал `GalacticExpansion.Core` при `receiver` `"GalacticExpansion"`. Исправление: единственная точка вызова — `EmpyrionModChannel` в сборке `GalacticExpansion.dll` (`NoInlining`, отдельный кадр стека). `NetworkBridge` ходит только через `IEmpyrionModChannel`.
 
-2. **EmpyrionGateway.TryCompleteResponse: NullReferenceException** — `data.GetType()` на null (Event_Ok с data=null) → NRE → SeqNr не разрешался → timeout.
+`DeserializeMessage` в этот скоуп не входил. Пакет приходит и падает: `DeserializeObject<IPCMessage>` на абстрактном классе (`Path 'pf'`). Ответа нет, деди получает `IPC spawn timeout after 15s`. Чинить чтением поля `type` и десериализацией конкретного класса.
 
-**Решение:**
-
-1. **IPCEntitySpawner переработан:** На Dedi `_directSpawner` удалён полностью.
-   - Dedi-конструктор: `(NetworkBridge, IPlacementResolver, ApplicationMode, ILogger)` — без IEntitySpawner
-   - `SpawnStructureAtTerrainAsync` на Dedi: `_placementResolver.FindLocationAtTerrainAsync` → `SpawnStructureAsync` (IPC)
-   - `DestroyEntityAsync`/`EntityExistsAsync` на Dedi: `InvalidOperationException`
-   - PfServer-конструктор без изменений
-
-2. **TryCompleteResponse: null-check** — `if (data == null) return false` перед `data.GetType()`
-
-3. **ModMain: EntitySpawner убран** — `new EntitySpawner(...)` удалён из `InitializeGatewayAndModulesForDedi`
-
-**Изменённые файлы:**
-- `IPCEntitySpawner.cs` — полная переработка (Dedi без _directSpawner, IPlacementResolver)
-- `EmpyrionGateway.cs` — null-check в TryCompleteResponse
-- `ModMain.cs` — убран EntitySpawner из Dedi, новый конструктор IPCEntitySpawner
-
-**Результат:** 175/175 тестов (158 unit + 17 integration), сборка без ошибок.
+Phase 3.5 (EntitySpawner снят с Dedi) остаётся в силе, детали в `progress.md`. Поток материализации тот же: Dedi считает позицию, спавн только через IPC на PfServer.
 
 ## Поток данных
 
@@ -54,5 +36,6 @@
 
 ## Следующие шаги
 
-1. **Развёртывание и тестирование** на dedicated server
-2. Phase 4: Threat Director + AIM Orchestrator
+1. Починить `DeserializeMessage`: не создавать `IPCMessage`, сначала прочитать `type`.
+2. Повторить прогон материализации на dedicated: после разбора JSON должен быть ответ PfServer и EntityId.
+3. Phase 4: Threat Director + AIM Orchestrator.

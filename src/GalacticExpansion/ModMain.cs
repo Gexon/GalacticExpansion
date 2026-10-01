@@ -516,7 +516,9 @@ namespace GalacticExpansion
 
                 // КРИТИЧНО: NetworkBridge создаем ПЕРВЫМ (до InitializeGatewayAndModules)
                 _logger?.Info("Initializing NetworkBridge for Dedi process...");
-                _networkBridge = new NetworkBridge(modAPI, _logger ?? LogManager.GetCurrentClassLogger());
+                var ipcChannel = new EmpyrionModChannel(modAPI.Network);
+                _logger?.Info($"IPC channel '{ipcChannel.ChannelId}' (вызовы ModApi.Network из сборки мода)");
+                _networkBridge = new NetworkBridge(ipcChannel, _logger ?? LogManager.GetCurrentClassLogger());
                 _networkBridge.InitializeForDedi();
                 _logger?.Info("✅ NetworkBridge initialized for Dedi (can send commands to PfServer)");
 
@@ -848,7 +850,9 @@ namespace GalacticExpansion
                 // Инициализируем NetworkBridge для приема IPC команд от Dedi
                 // ВАЖНО: название playfield и IPC handler будут установлены в OnPlayfieldLoaded
                 _logger?.Info("Initializing NetworkBridge for PfServer...");
-                _networkBridge = new NetworkBridge(modAPI, _logger ?? LogManager.GetCurrentClassLogger());
+                var ipcChannel = new EmpyrionModChannel(modAPI.Network);
+                _logger?.Info($"IPC channel '{ipcChannel.ChannelId}' (вызовы ModApi.Network из сборки мода)");
+                _networkBridge = new NetworkBridge(ipcChannel, _logger ?? LogManager.GetCurrentClassLogger());
                 
                 // ВАЖНО: InitializeForPlayfieldServer и OnRequestReceived будут вызваны из OnPlayfieldLoaded
                 _logger?.Info("⏳ NetworkBridge created, waiting for OnPlayfieldLoaded to complete registration");

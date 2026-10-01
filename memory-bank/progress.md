@@ -2,7 +2,9 @@
 
 ## Текущий статус
 
-**Дата обновления:** 23.02.2026  
+**Дата обновления:** 01.10.2026  
+**IPC-канал (GetCallingAssembly):** ✅ пакеты ходят в обе стороны (логи v5, 18:30)  
+**DeserializeMessage:** ❌ следующий скоуп, спавн из-за этого таймаутится  
 **Phase 3.5 (Fix spawn routing):** ✅ РЕАЛИЗОВАНО  
 **Phase 4 (Combat):** не начата
 
@@ -21,7 +23,13 @@
 - `data.GetType()` на null (Event_Ok с data=null) бросал NRE → SeqNr не разрешался
 - **Исправление:** `if (data == null) return false` в TryCompleteResponse
 
-**Тесты:** 175/175 (158 unit + 17 integration)
+**Тесты:** 175/175 (158 unit + 17 integration) на момент Phase 3.5. После канала INetwork тесты заново не гонялись.
+
+### IPC-канал, 01.10.2026 ✅ доставка / ❌ разбор JSON
+
+`RegisterReceiver*` в игре ключует колбэк именем вызывающей сборки. Вызовы перенесены в `EmpyrionModChannel` (`GalacticExpansion.dll`). В логах v5 оба процесса получают `Received packet from 'GalacticExpansion'`.
+
+Дальше `DeserializeMessage` падает на абстрактном `IPCMessage` (`Path 'pf'`). Ответ не уходит, деди ловит `IPC spawn timeout after 15s`. Разбор JSON — отдельный скоуп, не делать «заодно» с каналом.
 
 ## Что работает
 
@@ -45,8 +53,3 @@
 - EntitySpawner полностью выпилен из Dedi
 - IPCEntitySpawner: Dedi = (NetworkBridge + IPlacementResolver), PfServer = (_directSpawner)
 - TryCompleteResponse: null-check для Event_Ok
-
-## Что дальше
-
-1. Тестирование на dedicated server: материализация работает через IPC
-2. Phase 4: Threat Director + AIM Orchestrator

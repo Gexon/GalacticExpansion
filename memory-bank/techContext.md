@@ -18,7 +18,7 @@
 - Спавн/удаление сущностей: `Request_Entity_Spawn`, `Request_Entity_Destroy`
 - Список структур: `Request_GlobalStructure_List`
 - Защита от decay: `Request_Structure_Touch`
-- **IPC коммуникация**: `INetwork.SendToPlayfieldServer()`, `INetwork.SendToDedicatedServer()`
+- **IPC коммуникация**: `INetwork.SendToPlayfieldServer()`, `INetwork.SendToDedicatedServer()`. Вызов только из `EmpyrionModChannel` (`GalacticExpansion.dll`): ключ колбэка = `GetCallingAssembly().GetName().Name`
 - **Определение процесса**: `IModApi.Application.Mode` (DedicatedServer / PlayfieldServer)
 - **Готовность playfield**: `IModApi.Application.OnPlayfieldLoaded` (IPlayfield instance)
 - **Прямой спавн (API2)**: `IPlayfield.SpawnPrefab()`, `IPlayfield.SpawnEntity()`, `IPlayfield.GetTerrainHeightAt()`
@@ -26,13 +26,13 @@
 ## Структура проекта
 
 - `src/GalacticExpansion.Core` — модули
-  - `IPC/` - IPC протокол, NetworkBridge, PlayfieldReadyNotification
+  - `IPC/` - IPC протокол, NetworkBridge, IEmpyrionModChannel, PlayfieldReadyNotification
   - `Spawning/` - EntitySpawner, IPCEntitySpawner, NativePlayfieldSpawner, StageManager
   - `Simulation/` - SimulationEngine, ColonyManager, ColonyTickModule
   - `Economy/` - EconomySimulator, UnitEconomyManager
   - `Gateway/` - EmpyrionGateway для ModAPI
 - `src/GalacticExpansion.Models` — модели данных
-- `src/GalacticExpansion` — entry point (ModMain)
+- `src/GalacticExpansion` — entry point (ModMain), `IPC/EmpyrionModChannel.cs` (единственные вызовы ModApi.Network)
 - `lib/` - Empyrion DLLs
 
 ## Локальная разработка
@@ -98,6 +98,14 @@ IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlac
 - `SimulationEngine` тики — `Task.Run` (ThreadPool)
 - **ЗАПРЕЩЕНО** `.GetAwaiter().GetResult()` / `.Wait()` / `.Result` в Game_Update → deadlock!
 - **Правильно:** `_ = Task.Run(async () => await ...)` + throttle + guard
+
+## IPC: кто вызывает INetwork
+
+`EmpyrionModChannel` в сборке мода. `NetworkBridge` в Core принимает `IEmpyrionModChannel` и не трогает `IModApi.Network`.
+
+`SendToPlayfieldServer` на dedicated возвращает `false`, пока PfServer процесса нет. `SendToDedicatedServer` в dedicated-сборке — заглушка `false`; рабочая реализация у клиентской сборки, которой пользуется PfServer. Наоборот тоже: с плейфилда `SendToPlayfieldServer` всегда `false`.
+
+Открытый баг: `DeserializeMessage` вызывает `DeserializeObject<IPCMessage>` при абстрактном базовом классе. Пакет уже доставлен (`Received packet from 'GalacticExpansion'`), дальше `Failed to deserialize message` и таймаут 15 с. Следующий скоуп.
 
 ## IPC протокол (типы сообщений)
 - `SpawnStructure` / `SpawnStructureResponse` — спавн структуры

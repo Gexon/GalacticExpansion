@@ -698,7 +698,7 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 5. SpawnViaIPCAsync() → создает SpawnStructureRequest
 6. NetworkBridge.SendRequestToPlayfieldAsync()
    - Сериализует в JSON → byte[]
-   - INetwork.SendToPlayfieldServer("GLEX", "Temperate Planet", data)
+   - INetwork.SendToPlayfieldServer("GalacticExpansion", "Temperate Planet", data)
    ↓
    ═══════════════════ [IPC через INetwork] ═══════════════════════
    ↓
@@ -733,10 +733,11 @@ INFO  | ✅ Colony abc123 materialized successfully on attempt 1
 - JSON сериализация, RequestId для tracking
 
 **2. NetworkBridge (IPC транспорт):**
-- `InitializeForDedi()` - регистрация receiver для Dedi процесса
-- `InitializeForPlayfieldServer()` - регистрация receiver для PfServer процесса
-- `SendRequestToPlayfieldAsync()` - отправка запроса с таймаутом (15s)
+- `InitializeForDedi()` — приём пакетов, пришедших с playfield
+- `InitializeForPlayfieldServer()` — приём пакетов, пришедших с dedicated
+- `SendRequestToPlayfieldAsync()` — отправка запроса с таймаутом (15s)
 - Request/Response tracking через `ConcurrentDictionary<Guid, TaskCompletionSource>`
+- Сам `ModApi.Network` не вызывает. Вызовы только из `EmpyrionModChannel` (`GalacticExpansion.dll`): игра вешает колбэк на `Assembly.GetCallingAssembly().GetName().Name`. Вызов из Core регистрирует канал `GalacticExpansion.Core`, `Send*` возвращает `true`, колбэк молчит. Подробности — `12_Multi_Process_IPC_Architecture.md`, раздел «Канал INetwork — имя вызывающей сборки».
 
 **3. IPCEntitySpawner (Маршрутизатор spawn):**
 - Wrapper вокруг EntitySpawner

@@ -1,8 +1,8 @@
 # Multi-Process IPC Architecture
 
-**Версия:** 1.0  
-**Дата:** 2026-02-06  
-**Статус:** Реализовано и протестировано
+**Версия:** 1.1  
+**Дата:** 2026-10-01  
+**Статус:** Доставка пакетов подтверждена на сервере. Разбор JSON в `DeserializeMessage` — следующий скоуп.
 
 ## Оглавление
 
@@ -13,6 +13,7 @@
 - [Компоненты системы](#компоненты-системы)
 - [Поток данных](#поток-данных)
 - [Критические детали реализации](#критические-детали-реализации)
+- [Канал INetwork — имя вызывающей сборки](#0-канал-inetwork--имя-вызывающей-сборки)
 - [Примеры использования](#примеры-использования)
 
 ---
@@ -223,20 +224,22 @@ private byte[] SerializeMessage(IPCMessage message)
 - Сопоставление request/response через RequestId
 - Обработка ошибок и таймаутов
 
+`NetworkBridge` сам `ModApi.Network` не вызывает. Регистрация и отправка идут через `IEmpyrionModChannel`. Реализация — `EmpyrionModChannel` в сборке `GalacticExpansion.dll`. Почему так — в разделе про вызывающую сборку.
+
 **Ключевые методы:**
 
 ```csharp
-// Инициализация для Dedi (sender)
+// Dedi слушает пакеты, которые созданы на playfield
 public void InitializeForDedi()
 {
-    _modApi.Network.RegisterReceiverForDediPackets(OnDediPacketReceived);
+    _channel.RegisterReceiverForPlayfieldPackets(OnDediPacketReceived);
 }
 
-// Инициализация для PfServer (receiver)
+// PfServer слушает пакеты, которые созданы на dedicated
 public void InitializeForPlayfieldServer(string playfieldName)
 {
     _currentPlayfield = playfieldName;
-    _modApi.Network.RegisterReceiverForPlayfieldPackets(OnPlayfieldPacketReceived);
+    _channel.RegisterReceiverForDediPackets(OnPlayfieldPacketReceived);
 }
 
 // Отправка запроса от Dedi к PfServer
@@ -362,7 +365,7 @@ public void Init(IModApi modAPI)
 7. NetworkBridge.SendRequestToPlayfieldAsync()
    - Регистрирует TaskCompletionSource для RequestId
    - Сериализует в JSON → byte[]
-   - INetwork.SendToPlayfieldServer("GLEX", "Temperate Planet", data)
+   - INetwork.SendToPlayfieldServer("GalacticExpansion", "Temperate Planet", data)
    ↓
    ═══════════════════════════════════════════════════════════════
                      [IPC через INetwork]
@@ -403,7 +406,7 @@ public void Init(IModApi modAPI)
       EntityId: 12345
     }
     ↓
-19. NetworkBridge.SendToDedicatedServer("GLEX", responseData, "Temperate Planet")
+19. NetworkBridge.SendToDedicatedServer("GalacticExpansion", responseData, "Temperate Planet")
     ↓
    ═══════════════════════════════════════════════════════════════
                      [IPC через INetwork]
@@ -435,6 +438,43 @@ public void Init(IModApi modAPI)
 
 ## Критические детали реализации
 
+### 0. Канал INetwork — имя вызывающей сборки
+
+Проверено по IL `Eleon.ModBridge.NetworkBridge` в `Assembly-CSharp.dll` (не наш класс) и по логам `logs-2006-10-01_v5` (2026-10-01 18:30): после переноса вызовов в `GalacticExpansion.dll` обе стороны пишут `Received packet from 'GalacticExpansion'`.
+
+Игра не смотрит ни на `Name` в `*_Info.yaml`, ни на папку мода.
+
+`RegisterReceiverForDediPackets` / `RegisterReceiverForPlayfieldPackets`:
+
+1. `Assembly.GetCallingAssembly()`
+2. ключ словаря = `assembly.GetName().Name`
+3. в словарь кладётся колбэк
+
+`OnDataReceivedFromDedicated` / `OnDataReceivedFromPlayfieldServer` делают `TryGetValue(receiver)`. Нет ключа — метод выходит молча, колбэк не вызывается, в лог игры ничего не пишется.
+
+`Send*` при этом может вернуть `true`: это значит «процесс назначения найден», а не «колбэк мода вызван». `sender` в колбэке — имя сборки, которая вызвала `Send*`. Оно совпадает со строкой `receiver` только когда и регистрация, и отправка идут из сборки с этим именем.
+
+| Откуда вызван `Register*` / `Send*` | Ключ колбэка | Что будет, если `receiver` = `"GalacticExpansion"` |
+| --- | --- | --- |
+| `GalacticExpansion.dll` (`EmpyrionModChannel`) | `GalacticExpansion` | пакет доходит |
+| `GalacticExpansion.Core.dll` (`NetworkBridge`) | `GalacticExpansion.Core` | `Send*` часто `true`, колбэка нет |
+
+Так устроен рабочий пример EmpyrionScripting: и `RegisterReceiverForPlayfieldPackets`, и `SendToDedicatedServer("EmpyrionScripting", ...)` живут в `EmpyrionScripting.dll`. ASTIC на форуме Empyrion отдельно писал, что канал — имя мода, и DLL у него названа так же.
+
+Наши правила:
+
+- Единственная точка вызова `ModApi.Network` — `src/GalacticExpansion/IPC/EmpyrionModChannel.cs`.
+- Методы помечены `NoInlining` и имеют отдельный кадр стека в этой сборке. Если JIT перенесёт `call` в Core, `GetCallingAssembly()` снова увидит `GalacticExpansion.Core`.
+- `receiver` берётся из `typeof(EmpyrionModChannel).Assembly.GetName().Name`, не из строковой константы в Core.
+- `NetworkBridge` принимает `IEmpyrionModChannel` и фильтрует `sender == channel.ChannelId`.
+
+Какой `Send*` реально что-то отправляет, зависит от процесса. В dedicated `Assembly-CSharp` метод `SendToDedicatedServer` — заглушка `ldc.i4.0; ret`. В клиентской сборке, которой пользуется PfServer, заглушка — `SendToPlayfieldServer`. Вызов «в свою» сторону всегда `false`. `SendToPlayfieldServer` также возвращает `false`, пока процесс плейфилда ещё не поднят (в логах v4 это `Failed to send message to playfield`, до `OnPlayfieldLoaded`).
+
+Направления не перепутаны:
+
+- Dedi слушает `RegisterReceiverForPlayfieldPackets` и шлёт `SendToPlayfieldServer`.
+- PfServer слушает `RegisterReceiverForDediPackets` и шлёт `SendToDedicatedServer`.
+
 ### 1. Порядок инициализации (КРИТИЧНО!)
 
 **Проблема**: Если создать модули ДО NetworkBridge и IPCEntitySpawner, они получат ссылку на обычный EntitySpawner → spawn будет в неправильном процессе!
@@ -444,8 +484,10 @@ public void Init(IModApi modAPI)
 ```csharp
 private void InitializeDedicatedServer(IModApi modAPI)
 {
-    // 1. ПЕРВЫМ создаем NetworkBridge!
-    _networkBridge = new NetworkBridge(modAPI, _logger);
+    // 1. Канал создаётся в сборке GalacticExpansion.dll, затем NetworkBridge.
+    //    Вызов ModApi.Network из Core зарегистрирует колбэк под именем GalacticExpansion.Core.
+    var channel = new EmpyrionModChannel(modAPI.Network);
+    _networkBridge = new NetworkBridge(channel, _logger);
     _networkBridge.InitializeForDedi();
     
     // 2. Создаем Gateway, StateStore, EventBus, ModuleRegistry
@@ -660,9 +702,10 @@ NLog.GlobalDiagnosticsContext.Set("process", _processPrefix);
 - ✅ Проверьте логи: должно быть `Sending IPC spawn request` в Dedi
 
 **2. `IPC spawn timeout after 15s`**
-- ✅ PfServer процесс может еще не загрузиться
-- ✅ Проверьте что OnPlayfieldLoaded был вызван в PfServer
-- ✅ Проверьте что playfieldName совпадает точно (регистрозависимо!)
+- В логе PfServer нет `Received packet` — пакет не дошёл до колбэка. Чаще всего `Register*`/`Send*` вызваны не из `GalacticExpansion.dll` (ключ `GalacticExpansion.Core`), либо playfield-процесс ещё не зарегистрировал приёмник. `Send*` при этом может быть `true`.
+- Есть `Received packet from 'GalacticExpansion'`, затем `Failed to deserialize message` и `Could not create an instance of type IPCMessage` — транспорт жив. `DeserializeMessage` делает `DeserializeObject<IPCMessage>`, а базовый класс абстрактный. Это открытый баг, чинится отдельно: сначала прочитать поле `type`, потом десериализовать конкретный класс.
+- `Failed to send message to playfield` (исключение, не таймаут) — `SendToPlayfieldServer` вернул `false`: процесс плейфилда ещё не поднят.
+- Имя playfield сравнивается как есть, включая пробелы и регистр.
 
 **3. `Playfield mismatch! Requested=X, Current=Y`**
 - ✅ IPC команда ушла не в тот PfServer процесс
