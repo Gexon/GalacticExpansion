@@ -237,7 +237,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             var entityId = 123;
 
             // Act
-            await _spawner.DestroyEntityAsync(entityId);
+            await _spawner.DestroyEntityAsync("Akua", entityId);
 
             // Assert
             _gatewayMock.Verify(
@@ -252,8 +252,8 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task DestroyEntityAsync_Ignores_InvalidEntityId()
         {
             // Act
-            await _spawner.DestroyEntityAsync(0);
-            await _spawner.DestroyEntityAsync(-1);
+            await _spawner.DestroyEntityAsync("Akua", 0);
+            await _spawner.DestroyEntityAsync("Akua", -1);
 
             // Assert
             _gatewayMock.Verify(
@@ -271,7 +271,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             var entityIds = new List<int> { 100, 101, 102 };
 
             // Act
-            var successCount = await _spawner.DestroyEntitiesAsync(entityIds);
+            var successCount = await _spawner.DestroyEntitiesAsync("Akua", entityIds);
 
             // Assert
             Assert.Equal(3, successCount);
@@ -287,7 +287,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task DestroyEntitiesAsync_ReturnsZero_ForEmptyList()
         {
             // Act
-            var successCount = await _spawner.DestroyEntitiesAsync(new List<int>());
+            var successCount = await _spawner.DestroyEntitiesAsync("Akua", new List<int>());
 
             // Assert
             Assert.Equal(0, successCount);
@@ -306,7 +306,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .ReturnsAsync(new CoreEntityInfo());
 
             // Act
-            var exists = await _spawner.EntityExistsAsync(123);
+            var exists = await _spawner.EntityExistsAsync("Akua", 123);
 
             // Assert
             Assert.True(exists);
@@ -325,7 +325,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 .ThrowsAsync(new Exception("Entity not found"));
 
             // Act
-            var exists = await _spawner.EntityExistsAsync(999);
+            var exists = await _spawner.EntityExistsAsync("Akua", 999);
 
             // Assert
             Assert.False(exists);
@@ -335,8 +335,8 @@ namespace GalacticExpansion.Tests.Unit.Spawning
         public async Task EntityExistsAsync_ReturnsFalse_ForInvalidEntityId()
         {
             // Act
-            var exists1 = await _spawner.EntityExistsAsync(0);
-            var exists2 = await _spawner.EntityExistsAsync(-1);
+            var exists1 = await _spawner.EntityExistsAsync("Akua", 0);
+            var exists2 = await _spawner.EntityExistsAsync("Akua", -1);
 
             // Assert
             Assert.False(exists1);

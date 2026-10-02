@@ -138,6 +138,32 @@ namespace GalacticExpansion.Core.Spawning
         }
 
         /// <summary>
+        /// Смотрит, есть ли id в словаре сущностей этого playfield.
+        /// Словарь IPlayfield.Entities — тот же, что в Module_05 §5.2. ContainsKey не бросает, если id нет.
+        /// Любой сбой чтения словаря тоже даёт false: проверка существования не должна ронять обработчик IPC.
+        /// </summary>
+        /// <param name="entityId">ID сущности.</param>
+        /// <returns>true, если сущность загружена на этом playfield.</returns>
+        public bool EntityExists(int entityId)
+        {
+            if (entityId <= 0)
+                return false;
+
+            try
+            {
+                var entities = _playfield.Entities;
+                var exists = entities != null && entities.ContainsKey(entityId);
+                _logger.Debug($"[NativeSpawner] Entity {entityId} exists={exists}");
+                return exists;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"[NativeSpawner] Cannot check whether entity {entityId} exists");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Получает высоту рельефа через IPlayfield.GetTerrainHeightAt().
         /// СИНХРОННЫЙ вызов - работает моментально.
         /// Если рельеф прочитать не удалось, метод бросает исключение.

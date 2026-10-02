@@ -5,7 +5,11 @@
 **Дата обновления:** 02.10.2026  
 **Фаза:** Материализация на dedicated подтверждена в игре. `BA_ZiraxOutpost` спавнится у земли.
 
-## Последние изменения (02.10.2026) — высота рельефа
+## Последние изменения (02.10.2026) — проверка сущности по IPC
+
+Тик материализованной колонии на Dedi больше не вызывает Gateway, чтобы узнать, жива ли главная структура. `EntityExistsAsync` и `DestroyEntityAsync` получают имя playfield из колонии и шлют `EntityExists` / `DestroyEntity`. PfServer отвечает по `IPlayfield.Entities` и `RemoveEntity`. Нет ответа, обрыв или `ok=false` дают `false` / тихий выход, без `Error updating colony`. `TouchStructure` по-прежнему идёт в Gateway с Dedi.
+
+## Предыдущее (02.10.2026) — высота рельефа
 
 Игрок подтвердил: структура стоит на земле. Высоту считает PfServer, не dedicated.
 

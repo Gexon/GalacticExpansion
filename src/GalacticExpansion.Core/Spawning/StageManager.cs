@@ -80,7 +80,7 @@ namespace GalacticExpansion.Core.Spawning
             // Проверка существования главной структуры (ТОЛЬКО для материализованных колоний)
             if (!colony.IsVirtual && colony.MainStructureId.HasValue)
             {
-                var exists = await _entitySpawner.EntityExistsAsync(colony.MainStructureId.Value);
+                var exists = await _entitySpawner.EntityExistsAsync(colony.Playfield, colony.MainStructureId.Value);
                 if (!exists)
                 {
                     _logger.Warn($"Colony {colony.Id}: Main structure {colony.MainStructureId} does not exist!");
@@ -141,7 +141,7 @@ namespace GalacticExpansion.Core.Spawning
                     // 1. Удаление старой структуры
                     if (colony.MainStructureId.HasValue)
                     {
-                        await _entitySpawner.DestroyEntityAsync(colony.MainStructureId.Value);
+                        await _entitySpawner.DestroyEntityAsync(colony.Playfield, colony.MainStructureId.Value);
                     }
 
                     // 2. Спавн новой структуры

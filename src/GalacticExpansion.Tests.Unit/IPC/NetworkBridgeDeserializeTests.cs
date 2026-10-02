@@ -120,6 +120,78 @@ namespace GalacticExpansion.Tests.Unit.IPC
         }
 
         /// <summary>
+        /// PfServer получает EntityExists (JSON начинается с pf) и отдаёт конкретный запрос, а не базовый IPCMessage.
+        /// </summary>
+        [Fact(DisplayName = "EntityExists — JSON доходит до обработчика конкретным типом")]
+        public async Task PlayfieldPacket_EntityExists_DeliversConcreteRequest()
+        {
+            var callback = CaptureDediPacketsCallback(out var bridge);
+            EntityExistsRequest? received = null;
+            var done = new TaskCompletionSource<bool>();
+
+            bridge.OnRequestReceived += (message, playfield) =>
+            {
+                received = message as EntityExistsRequest;
+                done.TrySetResult(true);
+                return Task.FromResult<IPCMessage?>(null);
+            };
+
+            var request = new EntityExistsRequest
+            {
+                RequestId = Guid.NewGuid(),
+                Playfield = Playfield,
+                EntityId = 55
+            };
+            var json = JsonConvert.SerializeObject(request);
+            Assert.StartsWith("{\"pf\":", json);
+
+            callback(ChannelId, Playfield, Encoding.UTF8.GetBytes(json));
+
+            var completed = await Task.WhenAny(done.Task, Task.Delay(2000));
+            Assert.Same(done.Task, completed);
+            Assert.NotNull(received);
+            Assert.Equal(request.RequestId, received!.RequestId);
+            Assert.Equal(55, received.EntityId);
+            Assert.Equal(Playfield, received.Playfield);
+        }
+
+        /// <summary>
+        /// PfServer получает DestroyEntity конкретным типом.
+        /// </summary>
+        [Fact(DisplayName = "DestroyEntity — JSON доходит до обработчика конкретным типом")]
+        public async Task PlayfieldPacket_DestroyEntity_DeliversConcreteRequest()
+        {
+            var callback = CaptureDediPacketsCallback(out var bridge);
+            DestroyEntityRequest? received = null;
+            var done = new TaskCompletionSource<bool>();
+
+            bridge.OnRequestReceived += (message, playfield) =>
+            {
+                received = message as DestroyEntityRequest;
+                done.TrySetResult(true);
+                return Task.FromResult<IPCMessage?>(null);
+            };
+
+            var request = new DestroyEntityRequest
+            {
+                RequestId = Guid.NewGuid(),
+                Playfield = Playfield,
+                EntityId = 88
+            };
+            var json = JsonConvert.SerializeObject(request);
+            Assert.StartsWith("{\"pf\":", json);
+
+            callback(ChannelId, Playfield, Encoding.UTF8.GetBytes(json));
+
+            var completed = await Task.WhenAny(done.Task, Task.Delay(2000));
+            Assert.Same(done.Task, completed);
+            Assert.NotNull(received);
+            Assert.Equal(request.RequestId, received!.RequestId);
+            Assert.Equal(88, received.EntityId);
+            Assert.Equal(Playfield, received.Playfield);
+        }
+
+        /// <summary>
         /// Неизвестное поле type не должно ронять callback: обработчик не вызывается.
         /// </summary>
         [Fact]

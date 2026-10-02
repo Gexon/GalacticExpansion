@@ -66,7 +66,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             };
 
             // По умолчанию: структуры существуют, ресурсов достаточно
-            _entitySpawnerMock.Setup(e => e.EntityExistsAsync(It.IsAny<int>())).ReturnsAsync(true);
+            _entitySpawnerMock.Setup(e => e.EntityExistsAsync(It.IsAny<string>(), It.IsAny<int>())).ReturnsAsync(true);
             _entitySpawnerMock.Setup(e => e.SpawnStructureAtTerrainAsync(
                     It.IsAny<string>(),
                     It.IsAny<string>(),
@@ -75,7 +75,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                     It.IsAny<int>(),
                     It.IsAny<float>()))
                 .ReturnsAsync(999); // Новый EntityId для новой структуры
-            _entitySpawnerMock.Setup(e => e.DestroyEntityAsync(It.IsAny<int>())).Returns(Task.CompletedTask);
+            _entitySpawnerMock.Setup(e => e.DestroyEntityAsync(It.IsAny<string>(), It.IsAny<int>())).Returns(Task.CompletedTask);
             
             _economySimulatorMock.Setup(e => e.HasEnoughResourcesForUpgrade(It.IsAny<Colony>())).Returns(true);
             _economySimulatorMock.Setup(e => e.ConsumeResourcesForUpgrade(It.IsAny<Colony>(), It.IsAny<float>()));
@@ -139,7 +139,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 Stage = ColonyStage.ConstructionYard,
                 MainStructureId = 123
             };
-            _entitySpawnerMock.Setup(e => e.EntityExistsAsync(123)).ReturnsAsync(false);
+            _entitySpawnerMock.Setup(e => e.EntityExistsAsync(It.IsAny<string>(), 123)).ReturnsAsync(false);
 
             // Act
             var canTransition = await _stageManager.CanTransitionToNextStageAsync(colony);
@@ -222,7 +222,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             await _stageManager.TransitionToNextStageAsync(colony);
 
             // Assert
-            _entitySpawnerMock.Verify(e => e.DestroyEntityAsync(100), Times.Once);
+            _entitySpawnerMock.Verify(e => e.DestroyEntityAsync("Akua", 100), Times.Once);
         }
 
         [Fact(DisplayName = "TransitionToNextStage - спавнит новую структуру следующей стадии")]

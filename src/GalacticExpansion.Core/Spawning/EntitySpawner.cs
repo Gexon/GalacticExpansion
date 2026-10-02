@@ -264,9 +264,12 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Уничтожает сущность по EntityId через API игры.
+        /// Имя playfield здесь не используется: этот класс работает в процессе, где сущность уже есть.
+        /// Маршрут на нужный playfield выбирает IPCEntitySpawner на dedicated.
         /// </summary>
+        /// <param name="playfield">Название playfield. Для прямого Gateway-вызова не читается.</param>
         /// <param name="entityId">Идентификатор сущности.</param>
-        public async Task DestroyEntityAsync(int entityId)
+        public async Task DestroyEntityAsync(string playfield, int entityId)
         {
             if (entityId <= 0)
             {
@@ -295,9 +298,10 @@ namespace GalacticExpansion.Core.Spawning
         /// <summary>
         /// Уничтожает несколько сущностей по списку EntityId; ошибки по отдельным сущностям игнорируются.
         /// </summary>
+        /// <param name="playfield">Название playfield. Передаётся в каждое одиночное удаление.</param>
         /// <param name="ids">Идентификаторы сущностей.</param>
         /// <returns>Количество успешно уничтоженных сущностей.</returns>
-        public async Task<int> DestroyEntitiesAsync(IEnumerable<int> ids)
+        public async Task<int> DestroyEntitiesAsync(string playfield, IEnumerable<int> ids)
         {
             if (ids == null || !ids.Any())
                 return 0;
@@ -309,7 +313,7 @@ namespace GalacticExpansion.Core.Spawning
             {
                 try
                 {
-                    await DestroyEntityAsync(entityId);
+                    await DestroyEntityAsync(playfield, entityId);
                     successCount++;
                 }
                 catch { }
@@ -321,10 +325,12 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Проверяет существование сущности по EntityId через запрос позиции/ротации.
+        /// Имя playfield здесь не используется: запрос идёт в Gateway того процесса, где крутится этот спавнер.
         /// </summary>
+        /// <param name="playfield">Название playfield. Для прямого Gateway-вызова не читается.</param>
         /// <param name="entityId">Идентификатор сущности.</param>
         /// <returns>True, если сущность существует.</returns>
-        public async Task<bool> EntityExistsAsync(int entityId)
+        public async Task<bool> EntityExistsAsync(string playfield, int entityId)
         {
             if (entityId <= 0)
                 return false;

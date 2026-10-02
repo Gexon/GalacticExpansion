@@ -412,6 +412,10 @@ namespace GalacticExpansion.Core.IPC
                     "PlayfieldReady" => JsonConvert.DeserializeObject<PlayfieldReadyRequest>(json),
                     "PlayfieldReadyResponse" => JsonConvert.DeserializeObject<PlayfieldReadyResponse>(json),
                     "PlayfieldReadyNotification" => JsonConvert.DeserializeObject<PlayfieldReadyNotification>(json),
+                    "EntityExists" => JsonConvert.DeserializeObject<EntityExistsRequest>(json),
+                    "EntityExistsResponse" => JsonConvert.DeserializeObject<EntityExistsResponse>(json),
+                    "DestroyEntity" => JsonConvert.DeserializeObject<DestroyEntityRequest>(json),
+                    "DestroyEntityResponse" => JsonConvert.DeserializeObject<DestroyEntityResponse>(json),
                     _ => throw new InvalidOperationException($"Unknown message type: {messageType}")
                 };
             }

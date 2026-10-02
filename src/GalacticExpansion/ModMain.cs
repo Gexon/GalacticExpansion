@@ -1172,6 +1172,86 @@ namespace GalacticExpansion
                         };
                     }
                 }
+                else if (request is EntityExistsRequest existsReq)
+                {
+                    // Чужой playfield не опрашиваем: сущности этого процесса ему не принадлежат.
+                    if (existsReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={existsReq.Playfield}, Current={_currentPlayfield}. Cannot check entity on the wrong playfield!";
+                        _logger?.Error($"[PfServer-Native] {error}");
+                        return new EntityExistsResponse
+                        {
+                            Success = false,
+                            Exists = false,
+                            ErrorMessage = error,
+                            Playfield = existsReq.Playfield,
+                            EntityId = existsReq.EntityId
+                        };
+                    }
+
+                    try
+                    {
+                        var exists = spawner.EntityExists(existsReq.EntityId);
+                        _logger?.Info($"[PfServer-Native] Entity {existsReq.EntityId} exists={exists}");
+                        return new EntityExistsResponse
+                        {
+                            Success = true,
+                            Exists = exists,
+                            Playfield = existsReq.Playfield,
+                            EntityId = existsReq.EntityId
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer-Native] Entity exists check failed for {existsReq.EntityId}");
+                        return new EntityExistsResponse
+                        {
+                            Success = false,
+                            Exists = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = existsReq.Playfield,
+                            EntityId = existsReq.EntityId
+                        };
+                    }
+                }
+                else if (request is DestroyEntityRequest destroyReq)
+                {
+                    if (destroyReq.Playfield != _currentPlayfield)
+                    {
+                        var error = $"Playfield mismatch! Requested={destroyReq.Playfield}, Current={_currentPlayfield}. Cannot destroy entity on the wrong playfield!";
+                        _logger?.Error($"[PfServer-Native] {error}");
+                        return new DestroyEntityResponse
+                        {
+                            Success = false,
+                            ErrorMessage = error,
+                            Playfield = destroyReq.Playfield,
+                            EntityId = destroyReq.EntityId
+                        };
+                    }
+
+                    try
+                    {
+                        _logger?.Info($"[PfServer-Native] Removing entity {destroyReq.EntityId}");
+                        spawner.RemoveEntity(destroyReq.EntityId);
+                        return new DestroyEntityResponse
+                        {
+                            Success = true,
+                            Playfield = destroyReq.Playfield,
+                            EntityId = destroyReq.EntityId
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error(ex, $"[PfServer-Native] Destroy entity failed for {destroyReq.EntityId}");
+                        return new DestroyEntityResponse
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message,
+                            Playfield = destroyReq.Playfield,
+                            EntityId = destroyReq.EntityId
+                        };
+                    }
+                }
                 else if (request is PlayfieldReadyRequest readyReq)
                 {
                     // Проверка готовности playfield (теперь без зависимости от Gateway)

@@ -330,39 +330,126 @@ namespace GalacticExpansion.Core.Spawning
         }
 
         /// <summary>
-        /// Уничтожает сущность по EntityId.
-        /// На Dedi — запрещено (нет _directSpawner), на PfServer — делегируем к _directSpawner.
+        /// Уничтожает сущность.
+        /// На PfServer делегирует прямому спавнеру. На dedicated шлёт DestroyEntity на playfield и не бросает исключение:
+        /// смена стадии колонии не должна ронять весь тик, если playfield не ответил.
         /// </summary>
-        public async Task DestroyEntityAsync(int entityId)
+        /// <param name="playfield">Playfield, где стоит сущность.</param>
+        /// <param name="entityId">Id сущности.</param>
+        public async Task DestroyEntityAsync(string playfield, int entityId)
         {
-            if (_directSpawner == null)
-                throw new InvalidOperationException("DestroyEntityAsync is not supported on Dedi — route through IPC");
+            if (entityId <= 0)
+            {
+                _logger.Warn($"[IPC] DestroyEntity skipped: invalid EntityId={entityId}");
+                return;
+            }
 
-            await _directSpawner.DestroyEntityAsync(entityId);
+            if (_directSpawner != null)
+            {
+                await _directSpawner.DestroyEntityAsync(playfield, entityId);
+                return;
+            }
+
+            if (_networkBridge == null || string.IsNullOrEmpty(playfield))
+            {
+                _logger.Warn($"[Dedi] DestroyEntity skipped: no bridge or empty playfield (entity {entityId})");
+                return;
+            }
+
+            var request = new DestroyEntityRequest
+            {
+                RequestId = Guid.NewGuid(),
+                Playfield = playfield,
+                EntityId = entityId
+            };
+
+            try
+            {
+                var response = await _networkBridge.SendRequestToPlayfieldAsync<DestroyEntityResponse>(
+                    request, playfield, timeoutMs: 3000);
+
+                if (!response.Success)
+                    _logger.Warn($"[Dedi] DestroyEntity failed for {entityId} on '{playfield}': {response.ErrorMessage}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"[Dedi] DestroyEntity IPC failed for {entityId} on '{playfield}'");
+            }
         }
 
         /// <summary>
-        /// Уничтожает несколько сущностей пакетом.
-        /// На Dedi — запрещено, на PfServer — делегируем к _directSpawner.
+        /// Удаляет несколько сущностей.
+        /// На dedicated каждый id уходит отдельным запросом DestroyEntity на тот же playfield.
         /// </summary>
-        public async Task<int> DestroyEntitiesAsync(IEnumerable<int> entityIds)
+        /// <param name="playfield">Playfield, где стоят сущности.</param>
+        /// <param name="entityIds">Список id.</param>
+        /// <returns>Сколько id было передано в удаление.</returns>
+        public async Task<int> DestroyEntitiesAsync(string playfield, IEnumerable<int> entityIds)
         {
-            if (_directSpawner == null)
-                throw new InvalidOperationException("DestroyEntitiesAsync is not supported on Dedi — route through IPC");
+            if (entityIds == null)
+                return 0;
 
-            return await _directSpawner.DestroyEntitiesAsync(entityIds);
+            if (_directSpawner != null)
+                return await _directSpawner.DestroyEntitiesAsync(playfield, entityIds);
+
+            int successCount = 0;
+            foreach (var entityId in entityIds)
+            {
+                await DestroyEntityAsync(playfield, entityId);
+                if (entityId > 0)
+                    successCount++;
+            }
+
+            return successCount;
         }
 
         /// <summary>
-        /// Проверяет существование сущности по EntityId.
-        /// На Dedi — запрещено, на PfServer — делегируем к _directSpawner.
+        /// Проверяет, есть ли сущность.
+        /// На dedicated спрашивает playfield по IPC. Нет ответа, обрыв канала или ok=false — это false, не исключение.
+        /// Иначе тик колонии каждую секунду пишет Error updating colony и не доходит до апгрейда.
         /// </summary>
-        public async Task<bool> EntityExistsAsync(int entityId)
+        /// <param name="playfield">Playfield, где искали сущность.</param>
+        /// <param name="entityId">Id сущности.</param>
+        /// <returns>true, только если playfield подтвердил, что сущность есть.</returns>
+        public async Task<bool> EntityExistsAsync(string playfield, int entityId)
         {
-            if (_directSpawner == null)
-                throw new InvalidOperationException("EntityExistsAsync is not supported on Dedi — route through IPC");
+            if (entityId <= 0)
+                return false;
 
-            return await _directSpawner.EntityExistsAsync(entityId);
+            if (_directSpawner != null)
+                return await _directSpawner.EntityExistsAsync(playfield, entityId);
+
+            if (_networkBridge == null || string.IsNullOrEmpty(playfield))
+            {
+                _logger.Warn($"[Dedi] EntityExists skipped: no bridge or empty playfield (entity {entityId})");
+                return false;
+            }
+
+            var request = new EntityExistsRequest
+            {
+                RequestId = Guid.NewGuid(),
+                Playfield = playfield,
+                EntityId = entityId
+            };
+
+            try
+            {
+                var response = await _networkBridge.SendRequestToPlayfieldAsync<EntityExistsResponse>(
+                    request, playfield, timeoutMs: 3000);
+
+                if (!response.Success)
+                {
+                    _logger.Warn($"[Dedi] EntityExists failed for {entityId} on '{playfield}': {response.ErrorMessage}");
+                    return false;
+                }
+
+                return response.Exists;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"[Dedi] EntityExists IPC failed for {entityId} on '{playfield}'");
+                return false;
+            }
         }
 
         /// <summary>

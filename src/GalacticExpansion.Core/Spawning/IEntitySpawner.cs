@@ -85,22 +85,28 @@ namespace GalacticExpansion.Core.Spawning
         /// <summary>
         /// Удаляет сущность по ID.
         /// Безопасен к повторному вызову (если сущность уже удалена, не выбрасывает исключение).
+        /// На dedicated playfield нужен, чтобы запрос ушёл в процесс, где сущность реально стоит.
         /// </summary>
+        /// <param name="playfield">Название playfield, на котором стоит сущность</param>
         /// <param name="entityId">ID сущности для удаления</param>
-        Task DestroyEntityAsync(int entityId);
+        Task DestroyEntityAsync(string playfield, int entityId);
 
         /// <summary>
-        /// Удаляет несколько сущностей пакетом.
+        /// Удаляет несколько сущностей на одном playfield.
+        /// На dedicated каждый id уходит отдельным IPC-запросом DestroyEntity.
         /// </summary>
+        /// <param name="playfield">Название playfield</param>
         /// <param name="entityIds">Список ID сущностей для удаления</param>
         /// <returns>Количество успешно удалённых сущностей</returns>
-        Task<int> DestroyEntitiesAsync(IEnumerable<int> entityIds);
+        Task<int> DestroyEntitiesAsync(string playfield, IEnumerable<int> entityIds);
 
         /// <summary>
         /// Проверяет, существует ли сущность с указанным ID.
+        /// На dedicated это вопрос к playfield-серверу, а не к локальному Gateway.
         /// </summary>
+        /// <param name="playfield">Название playfield, на котором искали сущность</param>
         /// <param name="entityId">ID сущности</param>
-        /// <returns>true, если сущность существует; false, если удалена или не найдена</returns>
-        Task<bool> EntityExistsAsync(int entityId);
+        /// <returns>true, если сущность существует; false, если удалена, не найдена или playfield не ответил</returns>
+        Task<bool> EntityExistsAsync(string playfield, int entityId);
     }
 }

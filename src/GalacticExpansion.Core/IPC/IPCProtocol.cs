@@ -305,4 +305,141 @@ namespace GalacticExpansion.Core.IPC
         [JsonProperty("pf")]
         public string Playfield { get; set; } = string.Empty;
     }
+
+    /// <summary>
+    /// Запрос от dedicated к playfield-серверу: жива ли сущность с этим id.
+    /// На dedicated нет списка сущностей playfield, поэтому спрашиваем процесс, который их держит.
+    /// </summary>
+    public class EntityExistsRequest : IPCMessage
+    {
+        /// <summary>
+        /// Ставит тип сообщения, чтобы разбор JSON выбрал этот класс.
+        /// </summary>
+        public EntityExistsRequest()
+        {
+            MessageType = "EntityExists";
+        }
+
+        /// <summary>
+        /// Playfield, на котором должна находиться сущность.
+        /// </summary>
+        [JsonProperty("pf")]
+        public string Playfield { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Id сущности в игре.
+        /// </summary>
+        [JsonProperty("eid")]
+        public int EntityId { get; set; }
+    }
+
+    /// <summary>
+    /// Ответ playfield-сервера: запрос обработан и сущность есть или её нет.
+    /// </summary>
+    public class EntityExistsResponse : IPCMessage
+    {
+        /// <summary>
+        /// Ставит тип сообщения, чтобы dedicated собрал именно этот ответ.
+        /// </summary>
+        public EntityExistsResponse()
+        {
+            MessageType = "EntityExistsResponse";
+        }
+
+        /// <summary>
+        /// true — playfield ответил. false — запрос не выполнен (чужой playfield, сбой).
+        /// Это не то же самое, что «сущности нет»: отсутствие сущности смотрите в Exists.
+        /// </summary>
+        [JsonProperty("ok")]
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// true — сущность есть в словаре playfield.
+        /// </summary>
+        [JsonProperty("exists")]
+        public bool Exists { get; set; }
+
+        /// <summary>
+        /// Почему запрос не выполнен. Пусто, если Success = true.
+        /// </summary>
+        [JsonProperty("err")]
+        public string? ErrorMessage { get; set; }
+
+        /// <summary>
+        /// Playfield из запроса, чтобы dedicated сверил ответ.
+        /// </summary>
+        [JsonProperty("pf")]
+        public string Playfield { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Id, который проверяли.
+        /// </summary>
+        [JsonProperty("eid")]
+        public int EntityId { get; set; }
+    }
+
+    /// <summary>
+    /// Запрос от dedicated удалить сущность на playfield.
+    /// Смена стадии колонии снимает старую структуру именно так: dedicated сам RemoveEntity вызвать не может.
+    /// </summary>
+    public class DestroyEntityRequest : IPCMessage
+    {
+        /// <summary>
+        /// Ставит тип сообщения для разбора JSON.
+        /// </summary>
+        public DestroyEntityRequest()
+        {
+            MessageType = "DestroyEntity";
+        }
+
+        /// <summary>
+        /// Playfield, на котором стоит сущность.
+        /// </summary>
+        [JsonProperty("pf")]
+        public string Playfield { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Id сущности, которую нужно убрать.
+        /// </summary>
+        [JsonProperty("eid")]
+        public int EntityId { get; set; }
+    }
+
+    /// <summary>
+    /// Ответ playfield-сервера на удаление сущности.
+    /// </summary>
+    public class DestroyEntityResponse : IPCMessage
+    {
+        /// <summary>
+        /// Ставит тип сообщения для разбора JSON.
+        /// </summary>
+        public DestroyEntityResponse()
+        {
+            MessageType = "DestroyEntityResponse";
+        }
+
+        /// <summary>
+        /// true — удаление выполнено или сущность уже отсутствовала.
+        /// </summary>
+        [JsonProperty("ok")]
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// Текст ошибки, если Success = false.
+        /// </summary>
+        [JsonProperty("err")]
+        public string? ErrorMessage { get; set; }
+
+        /// <summary>
+        /// Playfield из запроса.
+        /// </summary>
+        [JsonProperty("pf")]
+        public string Playfield { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Id, который просили удалить.
+        /// </summary>
+        [JsonProperty("eid")]
+        public int EntityId { get; set; }
+    }
 }

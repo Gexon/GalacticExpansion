@@ -43,6 +43,14 @@ namespace GalacticExpansion.Core.Spawning
         void RemoveEntity(int entityId);
 
         /// <summary>
+        /// Проверяет, есть ли сущность в IPlayfield.Entities (Module_05 §5.2).
+        /// Нет записи — false. Метод не бросает исключение, чтобы тик колонии на dedicated не падал.
+        /// </summary>
+        /// <param name="entityId">ID сущности.</param>
+        /// <returns>true, если id есть в словаре сущностей playfield.</returns>
+        bool EntityExists(int entityId);
+
+        /// <summary>
         /// Получает высоту рельефа через IPlayfield.GetTerrainHeightAt().
         /// СИНХРОННЫЙ вызов.
         /// Если рельеф прочитать нельзя, бросает исключение и не подставляет запасные 100 м.
