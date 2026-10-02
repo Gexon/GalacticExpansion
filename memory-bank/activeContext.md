@@ -28,5 +28,5 @@ Dedi: MaterializeColonyAsync
 
 ## Следующие шаги
 
-1. Брать высоту рельефа на PfServer (`GetTerrainHeightAt`) и ставить структуру на землю.
+1. Брать высоту рельефа на PfServer (`GetTerrainHeightAt`) и ставить структуру на землю. `AddVoxelArea` перед замером не обязателен: сначала без генерации вокселей. Если сетка вдали от игрока и баз не попадёт — наблюдатель перед повторным замером, одна точка на PfServer (Module_06, раздел 4.1).
 2. Phase 4: Threat Director + AIM Orchestrator.
