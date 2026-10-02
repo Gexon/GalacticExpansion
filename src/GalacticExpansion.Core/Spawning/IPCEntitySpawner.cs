@@ -79,8 +79,8 @@ namespace GalacticExpansion.Core.Spawning
             // Выбираем метод спавна в зависимости от процесса
             if (_processMode == ApplicationMode.DedicatedServer)
             {
-                // ==== DEDI ПРОЦЕСС: Отправляем IPC команду в PfServer ====
-                return await SpawnViaIPCAsync(playfield, prefabName, position, rotation, factionId);
+                // Абсолютная позиция: PfServer не пересчитывает Y.
+                return await SpawnViaIPCAsync(playfield, prefabName, position, rotation, factionId, snapToTerrain: false, heightOffset: 0.5f);
             }
             else if (_processMode == ApplicationMode.PlayfieldServer)
             {
@@ -99,18 +99,28 @@ namespace GalacticExpansion.Core.Spawning
         /// <summary>
         /// Спавн через IPC (Dedi -> PfServer).
         /// Отправляет SpawnStructureRequest и ждет SpawnStructureResponse.
+        /// snapToTerrain: true — PfServer заменит Y высотой рельефа. Абсолютный спавн передаёт false.
+        /// heightOffset учитывается только при snapToTerrain.
         /// </summary>
-        private async Task<int> SpawnViaIPCAsync(string playfield, string prefabName, Vector3 position, Vector3 rotation, int factionId)
+        private async Task<int> SpawnViaIPCAsync(
+            string playfield,
+            string prefabName,
+            Vector3 position,
+            Vector3 rotation,
+            int factionId,
+            bool snapToTerrain,
+            float heightOffset)
         {
             if (_networkBridge == null)
                 throw new InvalidOperationException("NetworkBridge not initialized for Dedi process");
 
-            _logger.Info($"[Dedi] Sending IPC spawn request: {prefabName} on {playfield}");
+            _logger.Info($"[Dedi] Sending IPC spawn request: {prefabName} on {playfield} (snap={snapToTerrain}, offset={heightOffset})");
 
             // Определяем тип entity из префаба
             var entityType = GetEntityTypeFromPrefab(prefabName);
 
-            // Создаем IPC запрос
+            // Создаем IPC запрос.
+            // snap=false оставляет присланную Y. snap=true просит PfServer посчитать землю сам.
             var request = new SpawnStructureRequest
             {
                 RequestId = Guid.NewGuid(),
@@ -119,7 +129,9 @@ namespace GalacticExpansion.Core.Spawning
                 Position = new[] { position.X, position.Y, position.Z },
                 Rotation = new[] { rotation.X, rotation.Y, rotation.Z },
                 FactionId = factionId,
-                EntityType = (byte)entityType
+                EntityType = (byte)entityType,
+                SnapToTerrain = snapToTerrain,
+                HeightOffset = heightOffset
             };
 
             try
@@ -154,23 +166,30 @@ namespace GalacticExpansion.Core.Spawning
 
         /// <summary>
         /// Спавнит структуру на рельефе (находит высоту автоматически).
-        /// На Dedi: определяем terrain height через PlacementResolver, затем спавним через IPC (SpawnStructureAsync).
+        /// На Dedi рельефа нет: в IPC уходят только X/Z, флаг SnapToTerrain и отступ.
+        /// Высоту считает PfServer через IPlayfield.GetTerrainHeightAt (Module_04 §3.2, Module_06 §4).
         /// На PfServer: делегируем к _directSpawner (прямой spawn через ModAPI).
         /// </summary>
         public async Task<int> SpawnStructureAtTerrainAsync(string playfield, string prefabName, float x, float z, int factionId, float heightOffset = 0.5f)
         {
             if (_processMode == ApplicationMode.DedicatedServer)
             {
-                // Dedi: определяем позицию локально через PlacementResolver, затем спавним через IPC
+                // Конструктор Dedi требует PlacementResolver, но Y с dedicated не финальная:
+                // кэш playfield там пуст, и запасные 100 м поднимают базу в воздух.
                 if (_placementResolver == null)
                     throw new InvalidOperationException("PlacementResolver not available on Dedi — initialization error");
 
-                _logger.Debug($"[Dedi] Finding terrain position for '{prefabName}' at ({x}, {z}) on '{playfield}'");
-                var terrainPos = await _placementResolver.FindLocationAtTerrainAsync(playfield, x, z, heightOffset);
-                _logger.Debug($"[Dedi] Terrain position resolved: {terrainPos}");
+                _logger.Debug($"[Dedi] Requesting terrain snap for '{prefabName}' at ({x}, {z}) on '{playfield}', offset={heightOffset}m");
 
-                // SpawnStructureAsync на Dedi пойдёт через SpawnViaIPCAsync → NetworkBridge → PfServer
-                return await SpawnStructureAsync(playfield, prefabName, terrainPos, new Vector3(0, 0, 0), factionId);
+                // Y в пакете не используется: PfServer подставит высоту земли.
+                return await SpawnViaIPCAsync(
+                    playfield,
+                    prefabName,
+                    new Vector3(x, 0f, z),
+                    new Vector3(0, 0, 0),
+                    factionId,
+                    snapToTerrain: true,
+                    heightOffset: heightOffset);
             }
             else if (_processMode == ApplicationMode.PlayfieldServer)
             {

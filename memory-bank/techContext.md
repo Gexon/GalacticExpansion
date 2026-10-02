@@ -74,14 +74,15 @@ BaseMax: RequiredResources=10000, ProductionRate=300, MinTime=14400s
 ### Dedi процесс:
 ```
 IMod.Init → InitializeGatewayAndModulesForDedi
-  → PlacementResolver (terrain height)
+  → PlacementResolver (дистанции; финальную Y не считает)
   → IPCEntitySpawner(networkBridge, placementResolver, Dedi, logger) — БЕЗ EntitySpawner!
   → регистрация модулей → SimulationEngine.StartAsync() [немедленно]
   → _simulationStarted = true → SetSimulationState(_state)
 NetworkBridge.OnPlayfieldReadyReceived → EnsurePlayfieldColoniesSpawnedAsync
 Game_Update (guard _simulationStarted) → Task.Run(TryMaterialize) [throttle 3s]
   → IPCEntitySpawner.SpawnStructureAtTerrainAsync
-    → PlacementResolver (terrain pos) → SpawnViaIPCAsync → NetworkBridge → PfServer
+    → SpawnViaIPCAsync (snap=true, X/Z, hoff) → NetworkBridge → PfServer
+      → GetTerrainHeightAt + offset → SpawnPrefab
 ```
 
 ### PfServer процесс:
@@ -113,7 +114,7 @@ IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlac
 `DeserializeMessage` читает поле `type` (`JObject`), затем `DeserializeObject` конкретного класса. `DeserializeObject<IPCMessage>` нельзя: класс абстрактный. В логе v5 путь `pf` — первое поле наследника.
 
 ## IPC протокол (типы сообщений)
-- `SpawnStructure` / `SpawnStructureResponse` — спавн структуры
+- `SpawnStructure` / `SpawnStructureResponse` — спавн структуры. Поля `snap` и `hoff`: при `snap=true` PfServer заменяет Y высотой рельефа плюс отступ
 - `SpawnNPC` / `SpawnNPCResponse` — спавн NPC
 - `PlayfieldReady` / `PlayfieldReadyResponse` — проверка готовности
 - `PlayfieldReadyNotification` — fire-and-forget уведомление (PfServer → Dedi) [retry 3×500ms]
@@ -123,5 +124,5 @@ IPCEntitySpawner на Dedi НЕ имеет _directSpawner — только IPlac
 - В тестах использовать `IPlayfieldWrapper` вместо `IPlayfield`
 - **UnityEngine.ILogger vs NLog.ILogger:** Добавлять alias при using UnityEngine
 - `SpawnPrefab` принимает имя без `.epb`. Нет файла — `EntityId=-1`
-- На Dedi высота рельефа — fallback 100 м; точный Y только через `IPlayfield` на PfServer
+- Точный Y структуры — `IPlayfield.GetTerrainHeightAt` на PfServer (`snap=true`). Ошибка чтения рельефа отменяет спавн. Кэш `PlacementResolver` на Dedi по-прежнему без playfield и для финальной Y не используется
 - **IPC таймауты**: 15s структуры, 10s NPC

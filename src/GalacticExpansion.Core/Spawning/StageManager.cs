@@ -306,7 +306,7 @@ namespace GalacticExpansion.Core.Spawning
                     position.X,
                     position.Z,
                     factionId,
-                    heightOffset: 10f // Выше для посадки
+                    heightOffset: 0.5f // Module_04 §3.2: полметра над землёй, не 10 м в воздухе
                 );
 
                 colony.MainStructureId = dropShipId;
@@ -375,7 +375,7 @@ namespace GalacticExpansion.Core.Spawning
                     position.X,
                     position.Z,
                     colony.FactionId,
-                    heightOffset: 10f
+                    heightOffset: 0.5f
                 );
 
                 colony.MainStructureId = structureId;

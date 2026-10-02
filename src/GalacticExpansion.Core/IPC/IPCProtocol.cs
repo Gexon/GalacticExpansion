@@ -84,6 +84,21 @@ namespace GalacticExpansion.Core.IPC
         /// </summary>
         [JsonProperty("etype")]
         public byte EntityType { get; set; }
+
+        /// <summary>
+        /// true — PfServer сам ставит Y по рельефу (GetTerrainHeightAt + HeightOffset).
+        /// false — спавн строго в Position, как прислал вызывающий код.
+        /// Старые пакеты без этого поля остаются абсолютным спавном.
+        /// </summary>
+        [JsonProperty("snap")]
+        public bool SnapToTerrain { get; set; }
+
+        /// <summary>
+        /// Отступ над землёй в метрах. Имеет смысл только вместе со SnapToTerrain.
+        /// По умолчанию 0.5 м — как в Module_04 §3.2.
+        /// </summary>
+        [JsonProperty("hoff")]
+        public float HeightOffset { get; set; } = 0.5f;
     }
 
     /// <summary>

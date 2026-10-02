@@ -429,7 +429,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                 position.X,
                 position.Z,
                 factionId,
-                10f
+                0.5f
             ), Times.Once);
         }
 

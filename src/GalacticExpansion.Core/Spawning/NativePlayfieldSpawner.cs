@@ -140,10 +140,15 @@ namespace GalacticExpansion.Core.Spawning
         /// <summary>
         /// Получает высоту рельефа через IPlayfield.GetTerrainHeightAt().
         /// СИНХРОННЫЙ вызов - работает моментально.
+        /// Если рельеф прочитать не удалось, метод бросает исключение.
+        /// Раньше здесь возвращались запасные 100 м, и структура повисала в воздухе.
+        /// Настоящая земля тоже может быть на высоте 100 м, поэтому ошибку нельзя
+        /// отличить по числу 100: её видно только по исключению.
         /// </summary>
         /// <param name="x">Координата X.</param>
         /// <param name="z">Координата Z.</param>
         /// <returns>Высота рельефа в метрах.</returns>
+        /// <exception cref="InvalidOperationException">Рельеф в точке прочитать нельзя. Спавн нужно отменить.</exception>
         public float GetTerrainHeight(float x, float z)
         {
             try
@@ -155,8 +160,9 @@ namespace GalacticExpansion.Core.Spawning
             catch (Exception ex)
             {
                 _logger.Error(ex, $"[NativeSpawner] Error getting terrain height at ({x}, {z})");
-                // Fallback - возвращаем 100м если не удалось получить высоту
-                return 100f;
+                throw new InvalidOperationException(
+                    $"Cannot read terrain height at ({x}, {z}). Spawn is aborted so the structure is not placed at the 100m fallback.",
+                    ex);
             }
         }
     }

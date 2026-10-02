@@ -89,9 +89,9 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 
 Секции вне `Configuration` (`Prefabs`, `ColonyEvolution`, `Economy`, `ThreatDirector`, `Hostility`, `Advanced`) не читаются: `MemberSerialization.OptIn`.
 
-### Высота рельефа только в PfServer (01.10.2026)
+### Высота рельефа только в PfServer (02.10.2026)
 
-`IPlayfield.GetTerrainHeightAt` есть в процессе, где сработал `OnPlayfieldLoaded`. На Dedi кэш `PlacementResolver` пуст, Y = 100 м (`DefaultTerrainHeight`) плюс `heightOffset` материализации (10 м). Структура появляется над землёй. Точную высоту нужно брать на PfServer в момент спавна.
+`IPlayfield.GetTerrainHeightAt` есть там, где сработал `OnPlayfieldLoaded`. Dedi не подставляет Y: `SpawnStructureAtTerrainAsync` шлёт `SnapToTerrain` и отступ. PfServer считает `Y = GetTerrainHeightAt + HeightOffset` (для базы 0.5 м) и только потом вызывает `SpawnPrefab`. Ошибка чтения рельефа отменяет спавн. Абсолютный `SpawnStructureAsync` Y не трогает. Проверено в игре: структура на земле.
 
 ### Interface Contract Alignment
 - Реализации обязаны повторять порядок параметров и смысл контрактов интерфейсов.
@@ -104,7 +104,7 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 - **Dedi-конструктор:** `(NetworkBridge, IPlacementResolver, ApplicationMode, ILogger)` — без IEntitySpawner
 - **PfServer-конструктор:** `(IEntitySpawner, ApplicationMode, ILogger)` — без NetworkBridge
 - На Dedi `_directSpawner = null`, `DestroyEntityAsync`/`EntityExistsAsync` бросают `InvalidOperationException`
-- Terrain height на Dedi через `IPlacementResolver.FindLocationAtTerrainAsync`
+- Высоту рельефа на Dedi не считать. Финальный Y — только `GetTerrainHeightAt` на PfServer при `SnapToTerrain`
 
 ### Канал INetwork = имя вызывающей сборки (01.10.2026)
 
@@ -142,4 +142,4 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 13. **UnityEngine.ILogger:** При using UnityEngine добавлять `using ILogger = NLog.ILogger;`
 14. **TryCompleteResponse:** `data == null` → return false (Event_Ok).
 15. **Префаб стадии** только из `Zirax.Stages`. Имя должно существовать в `Content/Prefabs`.
-16. **Высота на Dedi** — fallback 100 м, пока PfServer не отдаст `GetTerrainHeightAt`.
+16. **Высота структуры** — `GetTerrainHeightAt` на PfServer при `SnapToTerrain`. Запасные 100 м с Dedi в `SpawnPrefab` не передавать.

@@ -45,6 +45,7 @@ namespace GalacticExpansion.Core.Spawning
         /// <summary>
         /// Получает высоту рельефа через IPlayfield.GetTerrainHeightAt().
         /// СИНХРОННЫЙ вызов.
+        /// Если рельеф прочитать нельзя, бросает исключение и не подставляет запасные 100 м.
         /// </summary>
         /// <param name="x">Координата X.</param>
         /// <param name="z">Координата Z.</param>

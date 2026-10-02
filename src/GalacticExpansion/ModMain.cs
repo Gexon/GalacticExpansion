@@ -1058,10 +1058,36 @@ namespace GalacticExpansion
 
                     try
                     {
-                        // Конвертируем позицию и ротацию из IPC данных в Unity типы
-                        var position = UnityTypeConverter.ToUnityVector3(
-                            new Models.Vector3(spawnReq.Position[0], spawnReq.Position[1], spawnReq.Position[2])
-                        );
+                        // X и Z приходят с Dedi. Y с Dedi — запасная высота без рельефа, её нельзя использовать,
+                        // если запрос просит поставить структуру на землю (Module_04 §3.2, Module_06 §4).
+                        float x = spawnReq.Position[0];
+                        float y = spawnReq.Position[1];
+                        float z = spawnReq.Position[2];
+
+                        if (spawnReq.SnapToTerrain)
+                        {
+                            float terrainHeight;
+                            try
+                            {
+                                terrainHeight = spawner.GetTerrainHeight(x, z);
+                            }
+                            catch (Exception terrainEx)
+                            {
+                                var terrainError = $"Terrain height unavailable at ({x}, {z}): {terrainEx.Message}";
+                                _logger?.Error(terrainEx, $"[PfServer-Native] {terrainError}. Spawn of '{spawnReq.PrefabName}' aborted.");
+                                return new SpawnStructureResponse
+                                {
+                                    Success = false,
+                                    ErrorMessage = terrainError,
+                                    Playfield = spawnReq.Playfield
+                                };
+                            }
+
+                            y = TerrainSpawnHeight.Resolve(terrainHeight, spawnReq.HeightOffset);
+                            _logger?.Info($"[PfServer-Native] Snapped '{spawnReq.PrefabName}' to terrain Y={y:F1} (terrain={terrainHeight:F1} + offset={spawnReq.HeightOffset:F1}) at ({x:F1}, {z:F1})");
+                        }
+
+                        var position = new UnityEngine.Vector3(x, y, z);
                         var rotation = UnityTypeConverter.ToUnityQuaternion(
                             new Models.Vector3(spawnReq.Rotation[0], spawnReq.Rotation[1], spawnReq.Rotation[2])
                         );
