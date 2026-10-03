@@ -164,8 +164,22 @@ namespace GalacticExpansion.Core.Gateway
                     }
                 }
 
+                // Request_Structure_Touch игра подтверждает событием Event_Ok без тела.
+                // Пустой data нельзя разобрать рефлексией, но это успешный ответ: закрываем ожидание сразу,
+                // иначе тик колонии простаивает до таймаута в 3 секунды.
+                if (eventId == CmdId.Event_Ok && data == null)
+                {
+                    var completed = _sequenceManager.CompleteWithoutPayload(seqNr);
+                    if (completed)
+                    {
+                        Logger.Debug($"Event_Ok with empty data completed SeqNr {seqNr}");
+                        GameEventReceived?.Invoke(this, new GameEventArgs(eventId, seqNr, data!));
+                        return;
+                    }
+                }
+
                 // Пытаемся завершить ожидающий запрос с этим SeqNr
-                var completedResponse = TryCompleteResponse(seqNr, data);
+                var completedResponse = TryCompleteResponse(seqNr, data!);
 
                 if (!completedResponse)
                 {
@@ -173,8 +187,9 @@ namespace GalacticExpansion.Core.Gateway
                     Logger.Debug($"Event {eventId} is not a response, broadcasting to subscribers");
                 }
 
-                // Пробрасываем событие подписчикам в любом случае
-                GameEventReceived?.Invoke(this, new GameEventArgs(eventId, seqNr, data));
+                // Пробрасываем событие подписчикам в любом случае.
+                // data! — пустой Event_Ok тоже доходит сюда, если на этот номер никто не ждал.
+                GameEventReceived?.Invoke(this, new GameEventArgs(eventId, seqNr, data!));
             }
             catch (Exception ex)
             {
@@ -211,9 +226,8 @@ namespace GalacticExpansion.Core.Gateway
 
         /// <summary>
         /// Пытается завершить ожидающий ответ с использованием рефлексии.
-        /// ВАЖНО: data может быть null при Event_Ok от Empyrion (например, для Request_Entity_Spawn).
-        /// В этом случае мы не можем определить тип через рефлексию и возвращаем false,
-        /// чтобы событие было обработано как broadcast (не как response).
+        /// Пустой Event_Ok обрабатывается раньше, в HandleEvent: он завершает ожидание без тела.
+        /// Сюда такой ответ доходит только если на этот SeqNr никто не ждёт.
         /// </summary>
         private bool TryCompleteResponse(ushort seqNr, object data)
         {
@@ -251,7 +265,10 @@ namespace GalacticExpansion.Core.Gateway
                 // Критические операции (спавн/удаление)
                 CmdId.Request_Entity_Spawn => RequestPriority.Critical,
                 CmdId.Request_Entity_Destroy => RequestPriority.Critical,
-                CmdId.Request_Structure_Touch => RequestPriority.Critical,
+
+                // Касание структуры — фоновый сброс таймера распада, раз в час.
+                // Не стоит в одной очереди со спавном и удалением.
+                CmdId.Request_Structure_Touch => RequestPriority.Low,
                 
                 // Высокий приоритет (получение информации о структурах)
                 CmdId.Request_GlobalStructure_List => RequestPriority.High,

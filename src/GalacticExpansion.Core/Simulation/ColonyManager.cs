@@ -95,11 +95,9 @@ namespace GalacticExpansion.Core.Simulation
                     await _stageManager.TransitionToNextStageAsync(colony);
                 }
 
-                // 4. Защита структур от decay (ТОЛЬКО для материализованных колоний)
-                if (!colony.IsVirtual && ShouldMaintainStructures(colony))
-                {
-                    await _stageManager.MaintainColonyStructuresAsync(colony);
-                }
+                // 4. Защита структур от decay (только для материализованных колоний).
+                // Касание уходит отдельной задачей: тик колонии не ждёт ответ игры.
+                RequestStructureMaintenance(colony);
             }
             catch (Exception ex)
             {
@@ -175,14 +173,8 @@ namespace GalacticExpansion.Core.Simulation
                 }
                 else if (!colony.IsVirtual)
                 {
-                    try
-                    {
-                        await _stageManager.MaintainColonyStructuresAsync(colony);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Error(ex, $"Error maintaining colony {colony.Id} structures");
-                    }
+                    // Тот же часовой интервал, что и у тика. Ответ игры здесь тоже не ждём.
+                    RequestStructureMaintenance(colony);
                 }
             }
         }
@@ -262,13 +254,53 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Проверяет, нужно ли защищать структуры (каждый час)
+        /// Как часто сбрасывать таймер распада. Module_07 §6: раз в час, не раз в минуту.
         /// </summary>
-        private bool ShouldMaintainStructures(Colony colony)
+        private static readonly TimeSpan StructureMaintenanceInterval = TimeSpan.FromHours(1);
+
+        /// <summary>
+        /// Запускает касание структур, если с прошлого раза прошёл час.
+        /// Время попытки записывается сразу, чтобы сбой не повторял запрос на каждом тике.
+        /// Сам запрос к игре не ждём: ответ приходит отдельно и не держит тик колонии.
+        /// </summary>
+        /// <param name="colony">Колония, чьи структуры нужно защитить от распада.</param>
+        private void RequestStructureMaintenance(Colony colony)
         {
-            // Простая проверка: каждый 60-й тик (при 1 тик/сек = каждую минуту для теста)
-            // В production это должно быть настроено на 1 час
-            return DateTime.UtcNow.Second % 60 == 0;
+            if (colony.IsVirtual || !ShouldMaintainStructures(colony))
+                return;
+
+            colony.LastMaintenanceTime = DateTime.UtcNow;
+            _ = MaintainStructuresWithoutBlockingTickAsync(colony);
+        }
+
+        /// <summary>
+        /// Касается структур в фоне. Ошибка остаётся предупреждением и не помечает весь тик как сбойный.
+        /// </summary>
+        /// <param name="colony">Колония, для которой уже решено, что час прошёл.</param>
+        private async Task MaintainStructuresWithoutBlockingTickAsync(Colony colony)
+        {
+            try
+            {
+                await _stageManager.MaintainColonyStructuresAsync(colony);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"Failed to maintain structures for colony {colony.Id}");
+            }
+        }
+
+        /// <summary>
+        /// Проверяет, пора ли снова сбрасывать таймер распада.
+        /// Первый раз — сразу. Дальше не чаще одного раза в час.
+        /// </summary>
+        /// <param name="colony">Колония с полем времени прошлого касания.</param>
+        /// <returns>true, если касание ещё не делали или с прошлого прошёл час.</returns>
+        private static bool ShouldMaintainStructures(Colony colony)
+        {
+            if (!colony.LastMaintenanceTime.HasValue)
+                return true;
+
+            return DateTime.UtcNow - colony.LastMaintenanceTime.Value >= StructureMaintenanceInterval;
         }
     }
 }

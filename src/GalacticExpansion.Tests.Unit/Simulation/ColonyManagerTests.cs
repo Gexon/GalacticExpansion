@@ -269,5 +269,81 @@ namespace GalacticExpansion.Tests.Unit.Simulation
             // Assert
             _stateStoreMock.Verify(s => s.SaveAsync(It.IsAny<SimulationState>()), Times.Never);
         }
+
+        /// <summary>
+        /// Уровень: unit (09_Testing_Strategy §2.1).
+        /// Касание структур — раз в час и не держит тик, пока игра отвечает.
+        /// </summary>
+        [Fact(DisplayName = "UpdateColony - трогает структуры, если их ещё не касались")]
+        public async Task UpdateColony_TouchesStructures_WhenNeverMaintained()
+        {
+            // Arrange
+            var colony = new Colony { Id = "colony-1", IsVirtual = false, MainStructureId = 3001 };
+
+            // Act
+            await _colonyManager.UpdateColonyAsync(colony, 1.0f);
+
+            // Assert
+            _stageManagerMock.Verify(s => s.MaintainColonyStructuresAsync(colony), Times.Once);
+            Assert.NotNull(colony.LastMaintenanceTime);
+        }
+
+        [Fact(DisplayName = "UpdateColony - не трогает структуры повторно в течение часа")]
+        public async Task UpdateColony_SkipsStructureTouch_WhenMaintainedWithinTheHour()
+        {
+            // Arrange
+            var colony = new Colony
+            {
+                Id = "colony-1",
+                IsVirtual = false,
+                MainStructureId = 3001,
+                LastMaintenanceTime = DateTime.UtcNow.AddMinutes(-10)
+            };
+
+            // Act
+            await _colonyManager.UpdateColonyAsync(colony, 1.0f);
+
+            // Assert
+            _stageManagerMock.Verify(s => s.MaintainColonyStructuresAsync(It.IsAny<Colony>()), Times.Never);
+        }
+
+        [Fact(DisplayName = "UpdateColony - снова трогает структуры, когда прошёл час")]
+        public async Task UpdateColony_TouchesStructures_WhenLastMaintenanceIsOlderThanOneHour()
+        {
+            // Arrange
+            var colony = new Colony
+            {
+                Id = "colony-1",
+                IsVirtual = false,
+                MainStructureId = 3001,
+                LastMaintenanceTime = DateTime.UtcNow.AddHours(-2)
+            };
+
+            // Act
+            await _colonyManager.UpdateColonyAsync(colony, 1.0f);
+
+            // Assert
+            _stageManagerMock.Verify(s => s.MaintainColonyStructuresAsync(colony), Times.Once);
+        }
+
+        [Fact(DisplayName = "UpdateColony - не ждёт ответ касания и не останавливает тик")]
+        public async Task UpdateColony_DoesNotWait_ForStructureTouch()
+        {
+            // Arrange: касание не завершается. Тик всё равно должен вернуться сразу.
+            var hangingTouch = new TaskCompletionSource<bool>();
+            _stageManagerMock
+                .Setup(s => s.MaintainColonyStructuresAsync(It.IsAny<Colony>()))
+                .Returns(hangingTouch.Task);
+            var colony = new Colony { Id = "colony-1", IsVirtual = false, MainStructureId = 3001 };
+
+            // Act
+            var update = _colonyManager.UpdateColonyAsync(colony, 1.0f);
+            var finished = await Task.WhenAny(update, Task.Delay(500));
+
+            // Assert
+            Assert.Same(update, finished);
+            await update;
+            _stageManagerMock.Verify(s => s.MaintainColonyStructuresAsync(colony), Times.Once);
+        }
     }
 }

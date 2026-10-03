@@ -134,6 +134,42 @@ namespace GalacticExpansion.Core.Gateway
         }
 
         /// <summary>
+        /// Завершает ожидание успехом, когда игра прислала Event_Ok без данных.
+        /// Так отвечает Request_Structure_Touch: номер последовательности совпал, тела нет.
+        /// Для ссылочного типа результат будет null. Для типа-значения подставляется пустое значение,
+        /// чтобы вызывающий код не ждал таймаут.
+        /// </summary>
+        /// <param name="seqNr">Sequence number, которым отмечен и запрос, и Event_Ok.</param>
+        /// <returns>true, если кто-то ждал этот номер и ожидание закрыто.</returns>
+        public bool CompleteWithoutPayload(ushort seqNr)
+        {
+            if (!_pendingResponses.TryRemove(seqNr, out var response))
+                return false;
+
+            var tcsType = response.CompletionSource.GetType();
+            if (!tcsType.IsGenericType)
+            {
+                Logger.Error($"Cannot complete SeqNr {seqNr} without payload: completion source is not generic");
+                return false;
+            }
+
+            var resultType = tcsType.GetGenericArguments()[0];
+            var trySetResult = tcsType.GetMethod("TrySetResult");
+            if (trySetResult == null)
+            {
+                Logger.Error($"Cannot complete SeqNr {seqNr} without payload: TrySetResult is missing");
+                return false;
+            }
+
+            // null допустим только для класса. Для int и других структур берём default, иначе Invoke упадёт.
+            // Для ссылки null! говорит компилятору, что пустое тело ответа — осознанный результат, а не забытое значение.
+            object payload = resultType.IsValueType ? Activator.CreateInstance(resultType) : null!;
+            Logger.Debug($"Completing SeqNr {seqNr} with empty Event_Ok (type: {response.RequestType})");
+            trySetResult.Invoke(response.CompletionSource, new object[] { payload });
+            return true;
+        }
+
+        /// <summary>
         /// Завершает ожидание ответа с ошибкой.
         /// </summary>
         public bool CompleteWithError(ushort seqNr, Exception exception)

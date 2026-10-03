@@ -141,5 +141,41 @@ namespace GalacticExpansion.Tests.Unit.Gateway
             manager.CompleteResponse(seqNr2, "data");
             Assert.Equal(0, manager.PendingCount);
         }
+
+        /// <summary>
+        /// Уровень: unit (09_Testing_Strategy §2.1).
+        /// Event_Ok без тела должен закрыть ожидание сразу, а не оставлять его до таймаута.
+        /// </summary>
+        [Fact(DisplayName = "Пустой ответ закрывает ожидание ссылочного типа значением null")]
+        public async Task CompleteWithoutPayload_CompletesReferenceRequest_WithNull()
+        {
+            // Arrange
+            var manager = new SequenceManager();
+            var seqNr = manager.GetNextSequence();
+            var responseTask = manager.RegisterResponse<object>(seqNr, timeoutMs: 5000);
+
+            // Act
+            var completed = manager.CompleteWithoutPayload(seqNr);
+            var finished = await Task.WhenAny(responseTask, Task.Delay(500));
+
+            // Assert
+            Assert.True(completed);
+            Assert.Same(responseTask, finished);
+            Assert.Null(await responseTask);
+            Assert.Equal(0, manager.PendingCount);
+        }
+
+        [Fact(DisplayName = "Пустой ответ для неизвестного SeqNr не завершает чужое ожидание")]
+        public void CompleteWithoutPayload_ReturnsFalse_WhenSeqNrIsUnknown()
+        {
+            // Arrange
+            var manager = new SequenceManager();
+
+            // Act
+            var completed = manager.CompleteWithoutPayload(9999);
+
+            // Assert
+            Assert.False(completed);
+        }
     }
 }

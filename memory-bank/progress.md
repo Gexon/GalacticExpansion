@@ -15,11 +15,11 @@
 
 Раньше Dedi слал Y = 100 м (`DefaultTerrainHeight`) плюс отступ 10 м, база висела в воздухе. Теперь Y считается на PfServer: `GetTerrainHeightAt + 0.5`. Ошибка чтения рельефа отменяет спавн, запасные 100 м не подставляются. Проверено в игре: спавн у земли.
 
-**Тесты:** unit 175/175 после проверки сущности по IPC (раньше 167/167 на высоте рельефа).
+**Тесты:** unit-тесты интервала касания и пустого `Event_Ok` проходят. Ранее 175/175 после проверки сущности по IPC.
 
 ### Существование сущности, 02.10.2026 ✅
 
-На Dedi `EntityExistsAsync` бросал `InvalidOperationException` каждую секунду и обрывал тик колонии. Теперь проверка и удаление идут IPC на PfServer (`IPlayfield.Entities`, `RemoveEntity`). Сбой IPC не бросает исключение. `TouchStructure` с Dedi всё ещё через Gateway.
+На Dedi `EntityExistsAsync` бросал `InvalidOperationException` каждую секунду и обрывал тик колонии. Теперь проверка и удаление идут IPC на PfServer (`IPlayfield.Entities`, `RemoveEntity`). Сбой IPC не бросает исключение.
 
 ### Спавн префаба, 01.10.2026 ✅
 
@@ -27,7 +27,7 @@
 
 ### IPC и Phase 3.5 ✅
 
-`ModApi.Network` только из `EmpyrionModChannel`. На Dedi нет `EntitySpawner`: спавн через Gateway даёт `Event_Ok` без entity ID. PfServer: `NativePlayfieldSpawner`. `TryCompleteResponse`: `data == null` → false.
+`ModApi.Network` только из `EmpyrionModChannel`. На Dedi нет `EntitySpawner`: спавн через Gateway даёт `Event_Ok` без entity ID. PfServer: `NativePlayfieldSpawner`. Пустой `Event_Ok` на ожидающий SeqNr закрывает запрос.
 
 ## Что работает
 
@@ -39,4 +39,8 @@
 
 ## Известная проблема
 
-`TouchStructure` (`Request_Structure_Touch`) с Dedi всё ещё идёт в Gateway. Проверка и удаление сущности — уже через IPC. `colony.Position.Y` на Dedi может остаться запасной: для постановки на землю используются X и Z.
+`colony.Position.Y` на Dedi может остаться запасной: для постановки на землю используются X и Z.
+
+### Touch структур, 02.10.2026
+
+Раз в минуту тик ждал `Request_Structure_Touch` и падал по таймауту, хотя игра отвечала `Event_Ok` без данных. Теперь пустой `Event_Ok` закрывает запрос, касание идёт раз в час и не держит тик. Id тот же, что у `SpawnPrefab`.

@@ -85,6 +85,14 @@ namespace GalacticExpansion.Models
         public DateTime? LastUpgradeTime { get; set; }
 
         /// <summary>
+        /// Когда в последний раз сбрасывали таймер распада структур этой колонии.
+        /// Игра считает распад часами, поэтому касание нужно примерно раз в час.
+        /// Пустое значение значит, что с момента загрузки сейва структуры ещё не трогали.
+        /// </summary>
+        [JsonProperty("LastMaintenanceTime")]
+        public DateTime? LastMaintenanceTime { get; set; }
+
+        /// <summary>
         /// Время последней атаки на колонию
         /// </summary>
         [JsonProperty("LastAttackTime")]
