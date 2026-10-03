@@ -103,9 +103,11 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             packetCallback = captured!;
 
             placement = new Mock<IPlacementResolver>();
+            var gateway = new Mock<GalacticExpansion.Core.Gateway.IEmpyrionGateway>();
             return new IPCEntitySpawner(
                 bridge,
                 placement.Object,
+                gateway.Object,
                 ApplicationMode.DedicatedServer,
                 new Mock<ILogger>().Object);
         }

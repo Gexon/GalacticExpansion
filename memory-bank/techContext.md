@@ -15,7 +15,7 @@
 
 ## Ключевые ModAPI возможности
 
-- Спавн/удаление сущностей: `Request_Entity_Spawn`, `Request_Entity_Destroy`
+- Спавн: `Request_Entity_Spawn` только с playfield (`IPlayfield.SpawnPrefab`). Снос базы: `Request_Entity_Destroy` (структура). `IPlayfield.RemoveEntity` снимает сущность из словаря playfield и блоки базы не убирает.
 - Список структур: `Request_GlobalStructure_List`
 - Защита от decay: `Request_Structure_Touch`
 - **IPC коммуникация**: `INetwork.SendToPlayfieldServer()`, `INetwork.SendToDedicatedServer()`. Вызов только из `EmpyrionModChannel` (`GalacticExpansion.dll`): ключ колбэка = `GetCallingAssembly().GetName().Name`

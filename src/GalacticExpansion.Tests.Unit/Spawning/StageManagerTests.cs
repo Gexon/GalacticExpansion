@@ -75,7 +75,7 @@ namespace GalacticExpansion.Tests.Unit.Spawning
                     It.IsAny<int>(),
                     It.IsAny<float>()))
                 .ReturnsAsync(999); // Новый EntityId для новой структуры
-            _entitySpawnerMock.Setup(e => e.DestroyEntityAsync(It.IsAny<string>(), It.IsAny<int>())).Returns(Task.CompletedTask);
+            _entitySpawnerMock.Setup(e => e.DestroyEntityAsync(It.IsAny<string>(), It.IsAny<int>())).ReturnsAsync(true);
             
             _economySimulatorMock.Setup(e => e.HasEnoughResourcesForUpgrade(It.IsAny<Colony>())).Returns(true);
             _economySimulatorMock.Setup(e => e.ConsumeResourcesForUpgrade(It.IsAny<Colony>(), It.IsAny<float>()));
@@ -223,6 +223,42 @@ namespace GalacticExpansion.Tests.Unit.Spawning
 
             // Assert
             _entitySpawnerMock.Verify(e => e.DestroyEntityAsync("Akua", 100), Times.Once);
+        }
+
+        [Fact(DisplayName = "TransitionToNextStage - не спавнит новую структуру, если старая ещё на месте")]
+        public async Task TransitionToNextStage_DoesNotSpawn_WhenOldStructureRemains()
+        {
+            // Arrange
+            var upgradeTime = DateTime.UtcNow.AddSeconds(-100);
+            var colony = new Colony
+            {
+                Id = "colony-1",
+                Stage = ColonyStage.ConstructionYard,
+                MainStructureId = 100,
+                Playfield = "Akua",
+                FactionId = 2,
+                Position = new Vector3(1000, 100, -500),
+                LastUpgradeTime = upgradeTime
+            };
+            colony.Resources.VirtualResources = 5000;
+            _entitySpawnerMock.Setup(e => e.DestroyEntityAsync("Akua", 100)).ReturnsAsync(false);
+
+            // Act
+            await _stageManager.TransitionToNextStageAsync(colony);
+
+            // Assert
+            _entitySpawnerMock.Verify(e => e.SpawnStructureAtTerrainAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<float>(),
+                It.IsAny<float>(),
+                It.IsAny<int>(),
+                It.IsAny<float>()), Times.Never);
+            _economySimulatorMock.Verify(e => e.ConsumeResourcesForUpgrade(It.IsAny<Colony>(), It.IsAny<float>()), Times.Never);
+            Assert.Equal(ColonyStage.ConstructionYard, colony.Stage);
+            Assert.Equal(100, colony.MainStructureId);
+            Assert.Equal(5000f, colony.Resources.VirtualResources);
+            Assert.Equal(upgradeTime, colony.LastUpgradeTime);
         }
 
         [Fact(DisplayName = "TransitionToNextStage - спавнит новую структуру следующей стадии")]

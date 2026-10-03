@@ -2,16 +2,20 @@
 
 ## Текущее состояние
 
-**Дата обновления:** 02.10.2026  
-**Фаза:** Материализация на dedicated подтверждена в игре. `BA_ZiraxOutpost` спавнится у земли.
+**Дата обновления:** 03.10.2026  
+**Фаза:** Смена стадии должна сносить старую базу до спавна новой. В игре ещё не проверено.
 
-## Последние изменения (02.10.2026) — touch структур
+## Последние изменения (03.10.2026) — снос базы при апгрейде
+
+`BA_ZiraxOutpost` — структура. `IPlayfield.RemoveEntity` убирает запись сущности, блоки базы остаются, и новый префаб встаёт в ту же точку. На dedicated `DestroyEntityAsync` сначала шлёт `Request_Entity_Destroy` (тот же id, что у touch), затем IPC `RemoveEntity`, затем `EntityExists`. Метод возвращает `bool`. Если id ещё есть, `TransitionToNextStageAsync` выходит до спавна, смены стадии и списания ресурсов. Тик колонии при этом не пишет `Error updating colony`.
+
+## Предыдущее (02.10.2026) — touch структур
 
 Касание структуры с dedicated остаётся `Request_Structure_Touch` по тому же `MainStructureId`, что вернул `SpawnPrefab`. Игра отвечает `Event_Ok` без тела примерно за 50 мс. Раньше Gateway этот ответ не закрывал, и тик колонии ждал таймаут 3 секунды. Теперь пустой `Event_Ok` завершает запрос. Интервал — раз в час (`Colony.LastMaintenanceTime`), тик ответ не ждёт. Приоритет команды — низкий.
 
 ## Предыдущее (02.10.2026) — проверка сущности по IPC
 
-Тик материализованной колонии на Dedi больше не вызывает Gateway, чтобы узнать, жива ли главная структура. `EntityExistsAsync` и `DestroyEntityAsync` получают имя playfield из колонии и шлют `EntityExists` / `DestroyEntity`. PfServer отвечает по `IPlayfield.Entities` и `RemoveEntity`. Нет ответа, обрыв или `ok=false` дают `false` / тихий выход, без `Error updating colony`.
+Тик материализованной колонии на Dedi не вызывает Gateway, чтобы узнать, жива ли главная структура. `EntityExistsAsync` шлёт `EntityExists`. PfServer отвечает по `IPlayfield.Entities`. Нет ответа, обрыв или `ok=false` дают `false`, без `Error updating colony`.
 
 ## Предыдущее (02.10.2026) — высота рельефа
 
@@ -32,4 +36,5 @@ PfServer: GetTerrainHeightAt → Y → NativePlayfieldSpawner.SpawnPrefab
 
 ## Следующие шаги
 
-1. Phase 4: Threat Director + AIM Orchestrator.
+1. В игре: после смены стадии на планете одна база. Если `Request_Entity_Destroy` ответит `Event_Ok`, а старая база останется — следующий шаг тот же запрос из процесса playfield.
+2. Phase 4: Threat Director + AIM Orchestrator.

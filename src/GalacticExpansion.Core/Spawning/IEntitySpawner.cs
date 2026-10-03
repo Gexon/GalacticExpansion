@@ -83,13 +83,14 @@ namespace GalacticExpansion.Core.Spawning
         );
 
         /// <summary>
-        /// Удаляет сущность по ID.
-        /// Безопасен к повторному вызову (если сущность уже удалена, не выбрасывает исключение).
-        /// На dedicated playfield нужен, чтобы запрос ушёл в процесс, где сущность реально стоит.
+        /// Удаляет структуру по ID.
+        /// Безопасен к повторному вызову: если сущности уже нет, возвращает true и не бросает исключение.
+        /// На dedicated сначала уходит Request_Entity_Destroy (снос базы), затем снятие сущности с playfield.
         /// </summary>
         /// <param name="playfield">Название playfield, на котором стоит сущность</param>
         /// <param name="entityId">ID сущности для удаления</param>
-        Task DestroyEntityAsync(string playfield, int entityId);
+        /// <returns>true, если этого id больше нет и можно ставить новую структуру. false, если id ещё на месте или удалить его нельзя.</returns>
+        Task<bool> DestroyEntityAsync(string playfield, int entityId);
 
         /// <summary>
         /// Удаляет несколько сущностей на одном playfield.

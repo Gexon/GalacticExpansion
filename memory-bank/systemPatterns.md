@@ -101,9 +101,10 @@ OnPlayfieldLoaded → IPlayfield instance → NativePlayfieldSpawner(pfInstance)
 **Принцип:** На Dedi `EntitySpawner` НЕ создаётся и НЕ используется. Спавн через ModAPI Gateway на Dedi не работает — Empyrion отвечает `Event_Ok` без entity ID.
 
 **Архитектура IPCEntitySpawner:**
-- **Dedi-конструктор:** `(NetworkBridge, IPlacementResolver, ApplicationMode, ILogger)` — без IEntitySpawner
+- **Dedi-конструктор:** `(NetworkBridge, IPlacementResolver, IEmpyrionGateway, ApplicationMode, ILogger)` — без IEntitySpawner. Gateway только для `Request_Entity_Destroy`, не для спавна.
 - **PfServer-конструктор:** `(IEntitySpawner, ApplicationMode, ILogger)` — без NetworkBridge
-- На Dedi `_directSpawner = null`, `DestroyEntityAsync`/`EntityExistsAsync` бросают `InvalidOperationException`
+- На Dedi `_directSpawner = null`. `DestroyEntityAsync` возвращает `bool`: сначала `Request_Entity_Destroy` (снос базы), затем IPC `RemoveEntity`, затем `EntityExists`. Исключение не бросает. Пока id ещё на playfield, `StageManager` не ставит новый префаб и не меняет стадию.
+- `EntityExistsAsync` при обрыве IPC возвращает `false`.
 - Высоту рельефа на Dedi не считать. Финальный Y — только `GetTerrainHeightAt` на PfServer при `SnapToTerrain`
 
 ### Канал INetwork = имя вызывающей сборки (01.10.2026)

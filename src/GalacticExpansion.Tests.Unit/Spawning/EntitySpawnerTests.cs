@@ -35,6 +35,14 @@ namespace GalacticExpansion.Tests.Unit.Spawning
             _placementResolverMock = new Mock<IPlacementResolver>();
             _loggerMock = new Mock<ILogger>();
 
+            // По умолчанию игра принимает Request_Entity_Destroy. Без этого await получает null и удаление считается неудачным.
+            _gatewayMock
+                .Setup(g => g.SendRequestAsync<object>(
+                    CmdId.Request_Entity_Destroy,
+                    It.IsAny<Id>(),
+                    It.IsAny<int>()))
+                .ReturnsAsync(new object());
+
             // По умолчанию успешный спавн структуры
             _gatewayMock
                 .Setup(g => g.SendRequestAsync<int>(

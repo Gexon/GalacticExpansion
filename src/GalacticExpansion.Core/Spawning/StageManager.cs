@@ -138,10 +138,20 @@ namespace GalacticExpansion.Core.Spawning
                 // Физические операции ТОЛЬКО для материализованных колоний
                 if (!colony.IsVirtual)
                 {
-                    // 1. Удаление старой структуры
+                    // 1. Удаление старой структуры.
+                    // База — это структура. Пока её id ещё в мире, новый префаб на тех же X/Z
+                    // встанет внутрь старого. Тогда переход откладывается до следующего тика:
+                    // стадия, время апгрейда и ресурсы не меняются.
                     if (colony.MainStructureId.HasValue)
                     {
-                        await _entitySpawner.DestroyEntityAsync(colony.Playfield, colony.MainStructureId.Value);
+                        var oldStructureId = colony.MainStructureId.Value;
+                        var removed = await _entitySpawner.DestroyEntityAsync(colony.Playfield, oldStructureId);
+                        if (!removed)
+                        {
+                            _logger.Warn(
+                                $"Colony {colony.Id}: old structure {oldStructureId} on '{colony.Playfield}' is still present. Stage change postponed.");
+                            return;
+                        }
                     }
 
                     // 2. Спавн новой структуры

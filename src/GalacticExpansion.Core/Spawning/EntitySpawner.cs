@@ -263,35 +263,41 @@ namespace GalacticExpansion.Core.Spawning
         }
 
         /// <summary>
-        /// Уничтожает сущность по EntityId через API игры.
-        /// Имя playfield здесь не используется: этот класс работает в процессе, где сущность уже есть.
+        /// Уничтожает структуру по EntityId через Request_Entity_Destroy.
+        /// Эта команда сносит базу (блоки). Снятие только записи сущности базу в мире не убирает.
+        /// Имя playfield здесь не читается: этот класс работает в процессе, где структура уже есть.
         /// Маршрут на нужный playfield выбирает IPCEntitySpawner на dedicated.
         /// </summary>
         /// <param name="playfield">Название playfield. Для прямого Gateway-вызова не читается.</param>
-        /// <param name="entityId">Идентификатор сущности.</param>
-        public async Task DestroyEntityAsync(string playfield, int entityId)
+        /// <param name="entityId">Идентификатор структуры.</param>
+        /// <returns>true, если игра приняла удаление. false, если id негодный или команда не прошла.</returns>
+        public async Task<bool> DestroyEntityAsync(string playfield, int entityId)
         {
             if (entityId <= 0)
             {
                 _logger.Warn($"Attempted to destroy invalid EntityId={entityId}");
-                return;
+                return false;
             }
 
             _logger.Debug($"Destroying entity {entityId}");
 
             try
             {
+                // Request_Entity_Destroy сносит структуру (базу). Id — тот же, что вернул спавн.
                 await _gateway.SendRequestAsync<object>(CmdId.Request_Entity_Destroy, new Id { id = entityId },
                     timeoutMs: 5000);
                 _logger.Info($"✅ Entity {entityId} destroyed successfully");
+                return true;
             }
             catch (TimeoutException)
             {
                 _logger.Warn($"Timeout destroying entity {entityId} (may already be destroyed)");
+                return false;
             }
             catch (Exception ex)
             {
                 _logger.Error(ex, $"Error destroying entity {entityId}");
+                return false;
             }
         }
 
@@ -313,8 +319,8 @@ namespace GalacticExpansion.Core.Spawning
             {
                 try
                 {
-                    await DestroyEntityAsync(playfield, entityId);
-                    successCount++;
+                    if (await DestroyEntityAsync(playfield, entityId))
+                        successCount++;
                 }
                 catch { }
             }

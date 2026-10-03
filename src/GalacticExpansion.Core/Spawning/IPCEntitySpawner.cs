@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Eleon.Modding;
+using GalacticExpansion.Core.Gateway;
 using GalacticExpansion.Core.IPC;
 using GalacticExpansion.Core.Placement;
 using GalacticExpansion.Models;
@@ -17,7 +18,8 @@ namespace GalacticExpansion.Core.Spawning
     ///   (Empyrion отвечает Event_Ok без entity ID). Все spawn-операции на Dedi идут ТОЛЬКО через IPC к PfServer.
     /// - PfServer процесс использует _directSpawner для прямого spawn через ModAPI.
     /// 
-    /// На Dedi доступен только IPlacementResolver (определение terrain height) и NetworkBridge (IPC).
+    /// На Dedi спавн идёт только через NetworkBridge. Gateway здесь нужен для одной команды:
+    /// Request_Entity_Destroy сносит базу. Спавн через Gateway на Dedi по-прежнему запрещён.
     /// EntitySpawner на Dedi намеренно отсутствует, чтобы исключить случайный вызов спавна через Gateway.
     /// </summary>
     public class IPCEntitySpawner : IEntitySpawner
@@ -26,21 +28,25 @@ namespace GalacticExpansion.Core.Spawning
         private readonly IEntitySpawner? _directSpawner;
         private readonly NetworkBridge? _networkBridge; // Для Dedi процесса (IPC к PfServer)
         private readonly IPlacementResolver? _placementResolver; // Для Dedi: определение terrain height
+        private readonly IEmpyrionGateway? _gateway; // Для Dedi: Request_Entity_Destroy, не спавн
         private readonly ApplicationMode _processMode;
         private readonly ILogger _logger;
 
         /// <summary>
         /// Конструктор для Dedi процесса: IPC через NetworkBridge, terrain height через PlacementResolver.
+        /// Gateway передаётся только чтобы снести старую базу командой Request_Entity_Destroy.
         /// EntitySpawner НЕ передаётся — спавн через Gateway на Dedi запрещён.
         /// </summary>
         public IPCEntitySpawner(
             NetworkBridge networkBridge,
             IPlacementResolver placementResolver,
+            IEmpyrionGateway gateway,
             ApplicationMode processMode,
             ILogger logger)
         {
             _networkBridge = networkBridge ?? throw new ArgumentNullException(nameof(networkBridge));
             _placementResolver = placementResolver ?? throw new ArgumentNullException(nameof(placementResolver));
+            _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _directSpawner = null; // Намеренно null — спавн через Gateway на Dedi не работает
             _processMode = processMode;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -59,6 +65,7 @@ namespace GalacticExpansion.Core.Spawning
             _directSpawner = directSpawner ?? throw new ArgumentNullException(nameof(directSpawner));
             _networkBridge = null;
             _placementResolver = null;
+            _gateway = null;
             _processMode = processMode;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -330,32 +337,79 @@ namespace GalacticExpansion.Core.Spawning
         }
 
         /// <summary>
-        /// Уничтожает сущность.
-        /// На PfServer делегирует прямому спавнеру. На dedicated шлёт DestroyEntity на playfield и не бросает исключение:
-        /// смена стадии колонии не должна ронять весь тик, если playfield не ответил.
+        /// Уничтожает структуру.
+        /// На PfServer делегирует прямому спавнеру.
+        /// На dedicated сначала Request_Entity_Destroy: эта команда сносит базу (блоки).
+        /// Затем IPC DestroyEntity снимает запись сущности с playfield через RemoveEntity.
+        /// Исключение наружу не бросается: смена стадии сама решит, ставить ли новый префаб.
         /// </summary>
         /// <param name="playfield">Playfield, где стоит сущность.</param>
         /// <param name="entityId">Id сущности.</param>
-        public async Task DestroyEntityAsync(string playfield, int entityId)
+        /// <returns>true, если после обеих команд этого id на playfield уже нет.</returns>
+        public async Task<bool> DestroyEntityAsync(string playfield, int entityId)
         {
             if (entityId <= 0)
             {
                 _logger.Warn($"[IPC] DestroyEntity skipped: invalid EntityId={entityId}");
-                return;
+                return false;
             }
 
             if (_directSpawner != null)
-            {
-                await _directSpawner.DestroyEntityAsync(playfield, entityId);
-                return;
-            }
+                return await _directSpawner.DestroyEntityAsync(playfield, entityId);
 
             if (_networkBridge == null || string.IsNullOrEmpty(playfield))
             {
                 _logger.Warn($"[Dedi] DestroyEntity skipped: no bridge or empty playfield (entity {entityId})");
+                return false;
+            }
+
+            // Сначала структура. RemoveEntity до этой команды оставляет блоки базы в мире.
+            await DestroyStructureViaGatewayAsync(playfield, entityId);
+            await RemoveEntityViaIpcAsync(playfield, entityId);
+
+            // Словарь playfield — проверка, что id действительно исчез.
+            // Если он ещё там, новый префаб ставить нельзя: базы встанут друг в друга.
+            var stillThere = await EntityExistsAsync(playfield, entityId);
+            if (stillThere)
+            {
+                _logger.Warn($"[Dedi] Structure {entityId} on '{playfield}' is still present after destroy");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Просит dedicated снести структуру. Ошибка команды остаётся предупреждением:
+        /// дальше всё равно проверяем, исчез ли id.
+        /// </summary>
+        private async Task DestroyStructureViaGatewayAsync(string playfield, int entityId)
+        {
+            if (_gateway == null)
+            {
+                _logger.Warn($"[Dedi] Request_Entity_Destroy skipped: no gateway (entity {entityId})");
                 return;
             }
 
+            try
+            {
+                _logger.Info($"[Dedi] Request_Entity_Destroy for structure {entityId} on '{playfield}'");
+                await _gateway.SendRequestAsync<object>(
+                    CmdId.Request_Entity_Destroy,
+                    new Id { id = entityId },
+                    timeoutMs: 5000);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"[Dedi] Request_Entity_Destroy failed for {entityId} on '{playfield}'");
+            }
+        }
+
+        /// <summary>
+        /// Просит playfield убрать сущность из своего словаря. Ответ ok=false и обрыв канала не бросают исключение.
+        /// </summary>
+        private async Task RemoveEntityViaIpcAsync(string playfield, int entityId)
+        {
             var request = new DestroyEntityRequest
             {
                 RequestId = Guid.NewGuid(),
@@ -365,7 +419,7 @@ namespace GalacticExpansion.Core.Spawning
 
             try
             {
-                var response = await _networkBridge.SendRequestToPlayfieldAsync<DestroyEntityResponse>(
+                var response = await _networkBridge!.SendRequestToPlayfieldAsync<DestroyEntityResponse>(
                     request, playfield, timeoutMs: 3000);
 
                 if (!response.Success)
@@ -383,7 +437,7 @@ namespace GalacticExpansion.Core.Spawning
         /// </summary>
         /// <param name="playfield">Playfield, где стоят сущности.</param>
         /// <param name="entityIds">Список id.</param>
-        /// <returns>Сколько id было передано в удаление.</returns>
+        /// <returns>Сколько структур удалось снять: их id больше нет на playfield.</returns>
         public async Task<int> DestroyEntitiesAsync(string playfield, IEnumerable<int> entityIds)
         {
             if (entityIds == null)
@@ -395,8 +449,7 @@ namespace GalacticExpansion.Core.Spawning
             int successCount = 0;
             foreach (var entityId in entityIds)
             {
-                await DestroyEntityAsync(playfield, entityId);
-                if (entityId > 0)
+                if (await DestroyEntityAsync(playfield, entityId))
                     successCount++;
             }
 

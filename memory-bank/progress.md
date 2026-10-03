@@ -2,7 +2,7 @@
 
 ## Текущий статус
 
-**Дата обновления:** 02.10.2026  
+**Дата обновления:** 03.10.2026  
 **IPC-канал:** ✅ пакеты Dedi ↔ PfServer  
 **DeserializeMessage:** ✅ поле `type`, затем конкретный класс  
 **Материализация структуры:** ✅ `BA_ZiraxOutpost` в игре стоит на земле  
@@ -10,6 +10,10 @@
 **Phase 4 (Combat):** не начата
 
 ## Недавний прогресс
+
+### Снос базы при смене стадии, 03.10.2026
+
+`RemoveEntity` не убирает блоки `BA_ZiraxOutpost`. Dedicated теперь сначала вызывает `Request_Entity_Destroy`, затем IPC `RemoveEntity`. `DestroyEntityAsync` возвращает `bool`. Пока старый id на месте, новая стадия не спавнится и состояние колонии не меняется. В игре ещё не проверено.
 
 ### Высота рельефа, 02.10.2026 ✅
 
@@ -19,7 +23,7 @@
 
 ### Существование сущности, 02.10.2026 ✅
 
-На Dedi `EntityExistsAsync` бросал `InvalidOperationException` каждую секунду и обрывал тик колонии. Теперь проверка и удаление идут IPC на PfServer (`IPlayfield.Entities`, `RemoveEntity`). Сбой IPC не бросает исключение.
+На Dedi `EntityExistsAsync` бросал `InvalidOperationException` каждую секунду и обрывал тик колонии. Проверка идёт IPC на PfServer (`IPlayfield.Entities`). Сбой IPC не бросает исключение. Снос базы — отдельно: `Request_Entity_Destroy`, затем `RemoveEntity`.
 
 ### Спавн префаба, 01.10.2026 ✅
 

@@ -664,10 +664,12 @@ namespace GalacticExpansion
                 _container.Register<IPlacementResolver>(placementResolver);
                 logger.Info("PlacementResolver registered");
                 
-                // IPCEntitySpawner для Dedi: NetworkBridge + PlacementResolver, БЕЗ EntitySpawner
+                // IPCEntitySpawner для Dedi: NetworkBridge + PlacementResolver, БЕЗ EntitySpawner.
+                // Gateway здесь только для Request_Entity_Destroy. Спавн через него на Dedi не вызывается.
                 var ipcSpawner = new IPCEntitySpawner(
                     _networkBridge, // IPC к PfServer
                     placementResolver, // Terrain height на Dedi
+                    _gateway, // Снос базы: Request_Entity_Destroy
                     ApplicationMode.DedicatedServer,
                     logger
                 );
