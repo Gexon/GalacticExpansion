@@ -135,9 +135,6 @@ namespace GalacticExpansion.Core.Simulation
         }
 
         /// <summary>
-        /// Удаляет колонию
-        /// </summary>
-        /// <summary>
         /// Помечает виртуальные колонии на данном playfield для материализации.
         /// Вызывается из двух мест:
         /// 1. ColonyTickModule.OnGameEvent → Event_Playfield_Loaded (Empyrion API)
